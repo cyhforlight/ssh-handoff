@@ -15,23 +15,15 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-type runResult struct {
-	Session  string        `json:"session"`
-	Mode     executionMode `json:"mode"`
-	Stdout   *string       `json:"stdout,omitempty"`
-	Stderr   *string       `json:"stderr,omitempty"`
-	Output   *string       `json:"output,omitempty"`
-	ExitCode *int          `json:"exit_code"`
-	TimedOut bool          `json:"timed_out"`
-}
+var errInvalidSSHCommand = errors.New("ssh command must start with 'ssh ' and include a destination")
 
 func injectSSH(command string, options ...string) (string, error) {
 	if len(command) < 4 || !strings.HasPrefix(command, "ssh") {
-		return "", errors.New("ssh command must start with 'ssh ' and include a destination")
+		return "", errInvalidSSHCommand
 	}
 	separator := command[3]
 	if (separator != ' ' && separator != '\t') || strings.TrimSpace(command[3:]) == "" {
-		return "", errors.New("ssh command must start with 'ssh ' and include a destination")
+		return "", errInvalidSSHCommand
 	}
 
 	quoted := make([]string, len(options))
@@ -70,12 +62,18 @@ func downstreamCommand(session *session) (string, error) {
 	return injectSSH(session.Command, options...)
 }
 
-func controlCommand(session *session, operation string) (string, error) {
-	return injectSSH(session.Command,
+func runControlCommand(session *session, operation string) ([]byte, error) {
+	command, err := injectSSH(session.Command,
 		"-S", session.Platform.ControlPath,
 		"-O", operation,
 		"-o", "BatchMode=yes",
 	)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return exec.CommandContext(ctx, "/bin/sh", "-c", "exec "+command).CombinedOutput()
 }
 
 func executeSession(session *session, remoteCommand string, timeout time.Duration) (runResult, error) {
@@ -97,18 +95,17 @@ func executeSession(session *session, remoteCommand string, timeout time.Duratio
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", "exec "+command)
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
 	if session.Mode == modeExec {
 		command += " " + shellQuote(remoteCommand)
-		cmd = exec.CommandContext(ctx, "/bin/sh", "-c", "exec "+command)
-		cmd.Stdout = &stdout
-		cmd.Stderr = &stderr
-	} else {
+	}
+	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", "exec "+command)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	if session.Mode == modeShellPTY {
 		cmd.Stdin = strings.NewReader(strings.TrimRight(remoteCommand, "\n") + "\nexit\n")
-		cmd.Stdout = &stdout
 		cmd.Stderr = &stdout
+	} else {
+		cmd.Stderr = &stderr
 	}
 	err = cmd.Run()
 	if session.Mode == modeExec {
@@ -137,13 +134,7 @@ func executeSession(session *session, remoteCommand string, timeout time.Duratio
 }
 
 func checkSession(session *session) error {
-	command, err := controlCommand(session, "check")
-	if err != nil {
-		return err
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	output, err := exec.CommandContext(ctx, "/bin/sh", "-c", "exec "+command).CombinedOutput()
+	output, err := runControlCommand(session, "check")
 	if err == nil {
 		return nil
 	}
@@ -155,11 +146,7 @@ func checkSession(session *session) error {
 }
 
 func closeSession(session *session) error {
-	if command, err := controlCommand(session, "exit"); err == nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		_ = exec.CommandContext(ctx, "/bin/sh", "-c", "exec "+command).Run()
-		cancel()
-	}
+	_, _ = runControlCommand(session, "exit")
 
 	if processAlive(session.PID) {
 		if err := unix.Kill(session.PID, unix.SIGTERM); err != nil && !errors.Is(err, unix.ESRCH) {
@@ -167,18 +154,15 @@ func closeSession(session *session) error {
 		}
 	}
 	deadline := time.Now().Add(3 * time.Second)
-	for processAlive(session.PID) && time.Now().Before(deadline) {
+	for processAlive(session.PID) {
+		if time.Now().After(deadline) {
+			return fmt.Errorf("session %s did not close", session.ID)
+		}
 		time.Sleep(20 * time.Millisecond)
-	}
-	if processAlive(session.PID) {
-		return fmt.Errorf("session %s did not close", session.ID)
 	}
 	return nil
 }
 
 func terminateProcess(process *os.Process) {
-	if process == nil {
-		return
-	}
 	_ = process.Signal(unix.SIGTERM)
 }

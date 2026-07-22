@@ -22,7 +22,7 @@ ssh-handoff 是一个本地 CLI 工具：用户先在真实终端中完成 SSH �
 ```sh
 ssh-handoff open 'ssh -p 2222 user@example.com'
 ssh-handoff open --mode shell-pty 'ssh jump-alias'
-ssh-handoff open --name prod 'ssh -J bastion user@internal.example.com'
+ssh-handoff open --note '生产环境' 'ssh -J bastion user@internal.example.com'
 ```
 
 `open` 接受一条以 `ssh` 开头的完整命令字符串。工具只在 `ssh` 后插入连接复用所需的
@@ -35,12 +35,14 @@ ssh-handoff open --name prod 'ssh -J bastion user@internal.example.com'
 不再接受普通用户输入，并且每 30 分钟执行一次空指令以维持会话活跃，但不承载 Agent
 的工作命令。
 
-连接建立后，工具提供一个 session ID；用户也可以通过 `--name` 指定名称。
+连接建立后，工具生成一个简短的 session ID，作为 `run` 和 `close` 唯一接受的 session
+引用。用户可以通过 `--note` 添加可选备注；备注只用于展示，不要求唯一，也不参与查找。
+`list` 同时返回 ID、原始连接命令和备注，方便辨认不同 session。
 
 Agent 从另一个进程调用：
 
 ```sh
-ssh-handoff run <session> '<command>'
+ssh-handoff run <session-id> '<command>'
 ```
 
 v1 CLI 只包含四个子命令：
@@ -49,7 +51,7 @@ v1 CLI 只包含四个子命令：
 open   人工认证并保持 session
 run    在指定 session 中同步执行一条命令
 list   列出仍然存活的 session
-close  关闭指定 session
+close  按 ID 关闭指定 session
 ```
 
 原始终端在交给工具托管后不再接受普通用户输入；用户退出托管状态后才能继续操作。

@@ -18,6 +18,7 @@ import (
 const (
 	keepaliveInterval = 30 * time.Minute
 	handoffByte       = byte(0x1d) // Ctrl-]
+	noopCommand       = ":\n"
 )
 
 type handoffController struct {
@@ -27,40 +28,42 @@ type handoffController struct {
 
 func (controller *handoffController) handleInput(input []byte) (bool, error) {
 	changed := false
-	pending := make([]byte, 0, len(input))
-	flush := func() error {
-		if len(pending) == 0 {
+	segmentStart := 0
+	write := func(segment []byte) error {
+		if len(segment) == 0 {
 			return nil
 		}
-		_, err := controller.remote.Write(pending)
-		pending = pending[:0]
+		_, err := controller.remote.Write(segment)
 		return err
 	}
 
-	for _, character := range input {
+	for index, character := range input {
 		if character != handoffByte {
-			if !controller.managed {
-				pending = append(pending, character)
-			}
 			continue
 		}
-		if err := flush(); err != nil {
-			return changed, err
+		if !controller.managed {
+			if err := write(input[segmentStart:index]); err != nil {
+				return changed, err
+			}
 		}
-		if _, err := io.WriteString(controller.remote, ":\n"); err != nil {
+		if _, err := io.WriteString(controller.remote, noopCommand); err != nil {
 			return changed, err
 		}
 		controller.managed = !controller.managed
 		changed = true
+		segmentStart = index + 1
 	}
-	return changed, flush()
+	if controller.managed {
+		return changed, nil
+	}
+	return changed, write(input[segmentStart:])
 }
 
 func (controller *handoffController) keepalive() error {
 	if !controller.managed {
 		return nil
 	}
-	_, err := io.WriteString(controller.remote, ":\n")
+	_, err := io.WriteString(controller.remote, noopCommand)
 	return err
 }
 
@@ -124,7 +127,7 @@ func serveOpenSession(registry *sessionRegistry, session *session, stdin *os.Fil
 	defer signal.Stop(shutdown)
 
 	controller := handoffController{remote: terminal}
-	var keepalive *time.Timer
+	var keepalive *time.Ticker
 	var keepaliveTick <-chan time.Time
 	defer func() {
 		if keepalive != nil {
@@ -149,7 +152,7 @@ func serveOpenSession(registry *sessionRegistry, session *session, stdin *os.Fil
 			}
 			if controller.managed {
 				session.State = stateManaged
-				keepalive = time.NewTimer(keepaliveInterval)
+				keepalive = time.NewTicker(keepaliveInterval)
 				keepaliveTick = keepalive.C
 				writeText(stderr, "\r\n[ssh-handoff] 已托管；按 Ctrl-] 恢复交互。\r\n")
 			} else {
@@ -169,7 +172,6 @@ func serveOpenSession(registry *sessionRegistry, session *session, stdin *os.Fil
 				writeTextf(stderr, "\r\nssh-handoff: keepalive: %v\r\n", err)
 				return 2
 			}
-			keepalive.Reset(keepaliveInterval)
 		case <-resize:
 			_ = pty.InheritSize(stdin, terminal)
 		case <-shutdown:

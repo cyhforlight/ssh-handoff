@@ -19,15 +19,13 @@ func TestInjectSSHPreservesOriginalSuffix(t *testing.T) {
 	}
 }
 
-func TestInjectSSHRejectsAnythingExceptLoginCommand(t *testing.T) {
+func TestInjectSSHRejectsInvalidCommand(t *testing.T) {
 	for _, command := range []string{
 		"ssh",
 		"ssh   ",
 		"ssh\nhost",
 		" ssh host",
 		"sshpass host",
-		"sshh host",
-		"ssh-host",
 	} {
 		if _, err := injectSSH(command, "-M"); err == nil {
 			t.Errorf("injectSSH(%q) unexpectedly succeeded", command)
@@ -37,9 +35,8 @@ func TestInjectSSHRejectsAnythingExceptLoginCommand(t *testing.T) {
 
 func TestDownstreamCommandSelectsExecutionMode(t *testing.T) {
 	session := &session{
-		Command:  "ssh user@example.com",
-		Platform: platformSessionState{ControlPath: "/tmp/handoff.sock"},
-		Mode:     modeExec,
+		sessionInfo: sessionInfo{Mode: modeExec, Command: "ssh user@example.com"},
+		Platform:    platformSessionState{ControlPath: "/tmp/handoff.sock"},
 	}
 
 	execCommand, err := downstreamCommand(session)

@@ -31,7 +31,7 @@ func runtimeDirectory() string {
 		base = os.TempDir()
 	}
 	dir := filepath.Join(base, fmt.Sprintf("ssh-handoff-%d", os.Getuid()))
-	if len(filepath.Join(dir, "0123456789abcdef.sock")) > maximumControlPath {
+	if len(filepath.Join(dir, "ABCD.sock")) > maximumControlPath {
 		dir = filepath.Join("/tmp", fmt.Sprintf("ssh-handoff-%d", os.Getuid()))
 	}
 	return dir
@@ -69,7 +69,6 @@ func withFileLock(path string, action func() error) error {
 	if err := unix.Flock(int(file.Fd()), unix.LOCK_EX); err != nil {
 		return err
 	}
-	defer unix.Flock(int(file.Fd()), unix.LOCK_UN) //nolint:errcheck // lock is released on close regardless
 	return action()
 }
 

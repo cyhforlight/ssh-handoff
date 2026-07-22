@@ -2,45 +2,44 @@ package main
 
 import (
 	"bytes"
-	"errors"
-	"os"
+	"reflect"
 	"strings"
 	"testing"
 )
 
-func TestRegistryPersistsSessionAndPublishesOnlySummary(t *testing.T) {
+func TestRegistryPersistsSessionAndPublishesInfo(t *testing.T) {
 	registry := &sessionRegistry{dir: t.TempDir()}
-	created, err := registry.create("prod", modeShellPTY, "ssh jump-alias")
+	created, err := registry.create("production", modeShellPTY, "ssh jump-alias")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(created.ID) != 4 {
+		t.Fatalf("session ID length = %d, want 4: %s", len(created.ID), created.ID)
 	}
 	created.State = stateManaged
 	if err := registry.update(created); err != nil {
 		t.Fatal(err)
 	}
 
-	loaded, err := registry.resolve("prod")
+	loaded, err := registry.resolve(created.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.ID != created.ID || loaded.Command != "ssh jump-alias" || loaded.Platform != created.Platform || loaded.PID != os.Getpid() || loaded.State != stateManaged {
+	if !reflect.DeepEqual(loaded, created) {
 		t.Fatalf("persisted session is incomplete: %#v", loaded)
-	}
-
-	if _, err := registry.create("prod", modeExec, "ssh other"); !errors.Is(err, errNameInUse) {
-		t.Fatalf("duplicate name error = %v, want %v", err, errNameInUse)
 	}
 
 	var output bytes.Buffer
 	if code := listCommand(registry, nil, &output); code != 0 {
 		t.Fatalf("listCommand() code = %d, output = %s", code, output.String())
 	}
-	for _, privateField := range []string{"command", "control_path", "pid"} {
-		if strings.Contains(output.String(), `"`+privateField+`"`) {
-			t.Errorf("list output exposes private field %q: %s", privateField, output.String())
+	json := output.String()
+	for _, privateField := range []string{"control_path", "pid"} {
+		if strings.Contains(json, `"`+privateField+`"`) {
+			t.Errorf("list output exposes private field %q: %s", privateField, json)
 		}
 	}
-	if !strings.Contains(output.String(), `"name":"prod"`) || !strings.Contains(output.String(), `"state":"managed"`) {
-		t.Fatalf("list output is missing public state: %s", output.String())
+	if !strings.Contains(json, `"connection_command":"ssh jump-alias"`) || !strings.Contains(json, `"note":"production"`) || !strings.Contains(json, `"state":"managed"`) {
+		t.Fatalf("list output is missing public state: %s", json)
 	}
 }

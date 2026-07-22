@@ -1,11 +1,10 @@
 package main
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"slices"
@@ -28,43 +27,26 @@ const (
 	stateManaged     sessionState = "managed"
 )
 
-type session struct {
-	ID        string               `json:"id"`
-	Name      string               `json:"name,omitempty"`
-	Mode      executionMode        `json:"mode"`
-	State     sessionState         `json:"state"`
-	Command   string               `json:"command"`
-	Platform  platformSessionState `json:"platform"`
-	PID       int                  `json:"pid"`
-	StartedAt time.Time            `json:"started_at"`
-}
-
-type sessionSummary struct {
+type sessionInfo struct {
 	ID        string        `json:"id"`
-	Name      string        `json:"name,omitempty"`
+	Command   string        `json:"connection_command"`
+	Note      string        `json:"note,omitempty"`
 	Mode      executionMode `json:"mode"`
 	State     sessionState  `json:"state"`
 	StartedAt time.Time     `json:"started_at"`
 }
 
-func (value *session) summary() sessionSummary {
-	return sessionSummary{
-		ID:        value.ID,
-		Name:      value.Name,
-		Mode:      value.Mode,
-		State:     value.State,
-		StartedAt: value.StartedAt,
-	}
+type session struct {
+	sessionInfo
+	Platform platformSessionState `json:"platform"`
+	PID      int                  `json:"pid"`
 }
 
 type sessionRegistry struct {
 	dir string
 }
 
-var (
-	errSessionNotFound = errors.New("session not found")
-	errNameInUse       = errors.New("session name is already in use")
-)
+var errSessionNotFound = errors.New("session not found")
 
 func parseMode(value string) (executionMode, error) {
 	mode := executionMode(value)
@@ -82,36 +64,26 @@ func openRegistry() (*sessionRegistry, error) {
 	return &sessionRegistry{dir: dir}, nil
 }
 
-func (registry *sessionRegistry) create(name string, mode executionMode, command string) (*session, error) {
+func (registry *sessionRegistry) create(note string, mode executionMode, command string) (*session, error) {
 	var created *session
 	err := withFileLock(filepath.Join(registry.dir, ".registry.lock"), func() error {
-		sessions, err := registry.loadAll()
+		sessions, err := registry.loadLive()
 		if err != nil {
 			return err
-		}
-		for _, candidate := range sessions {
-			if !processAlive(candidate.PID) {
-				registry.removeFiles(candidate.ID)
-				continue
-			}
-			if name != "" && candidate.Name == name {
-				return errNameInUse
-			}
 		}
 
-		id, err := randomID()
-		if err != nil {
-			return err
-		}
+		id := newSessionID(sessions)
 		created = &session{
-			ID:        id,
-			Name:      name,
-			Mode:      mode,
-			State:     stateStarting,
-			Command:   command,
-			Platform:  newPlatformSessionState(registry.dir, id),
-			PID:       os.Getpid(),
-			StartedAt: time.Now().UTC(),
+			sessionInfo: sessionInfo{
+				ID:        id,
+				Command:   command,
+				Note:      note,
+				Mode:      mode,
+				State:     stateStarting,
+				StartedAt: time.Now().UTC(),
+			},
+			Platform: newPlatformSessionState(registry.dir, id),
+			PID:      os.Getpid(),
 		}
 		return registry.write(created)
 	})
@@ -122,36 +94,23 @@ func (registry *sessionRegistry) update(session *session) error {
 	return registry.write(session)
 }
 
-func (registry *sessionRegistry) resolve(reference string) (*session, error) {
-	sessions, err := registry.loadAll()
+func (registry *sessionRegistry) resolve(id string) (*session, error) {
+	sessions, err := registry.loadLive()
 	if err != nil {
 		return nil, err
 	}
 	for _, candidate := range sessions {
-		if candidate.ID != reference && candidate.Name != reference {
-			continue
+		if candidate.ID == id {
+			return candidate, nil
 		}
-		if !processAlive(candidate.PID) {
-			registry.removeFiles(candidate.ID)
-			return nil, fmt.Errorf("%w: %s", errSessionNotFound, reference)
-		}
-		return candidate, nil
 	}
-	return nil, fmt.Errorf("%w: %s", errSessionNotFound, reference)
+	return nil, fmt.Errorf("%w: %s", errSessionNotFound, id)
 }
 
 func (registry *sessionRegistry) list() ([]*session, error) {
-	sessions, err := registry.loadAll()
+	live, err := registry.loadLive()
 	if err != nil {
 		return nil, err
-	}
-	live := sessions[:0]
-	for _, candidate := range sessions {
-		if processAlive(candidate.PID) {
-			live = append(live, candidate)
-		} else {
-			registry.removeFiles(candidate.ID)
-		}
 	}
 	slices.SortFunc(live, func(a, b *session) int {
 		return a.StartedAt.Compare(b.StartedAt)
@@ -214,14 +173,37 @@ func (registry *sessionRegistry) loadAll() ([]*session, error) {
 	return sessions, nil
 }
 
+func (registry *sessionRegistry) loadLive() ([]*session, error) {
+	sessions, err := registry.loadAll()
+	if err != nil {
+		return nil, err
+	}
+	live := sessions[:0]
+	for _, session := range sessions {
+		if processAlive(session.PID) {
+			live = append(live, session)
+		} else {
+			registry.removeFiles(session.ID)
+		}
+	}
+	return live, nil
+}
+
 func (registry *sessionRegistry) statePath(id string) string {
 	return filepath.Join(registry.dir, id+".json")
 }
 
-func randomID() (string, error) {
-	bytes := make([]byte, 8)
-	if _, err := rand.Read(bytes); err != nil {
-		return "", err
+func newSessionID(sessions []*session) string {
+	const alphabet = "ABCDEFGHJKMNPRSTUVWXYZ2345689"
+
+	for {
+		var candidate [4]byte
+		for index := range candidate {
+			candidate[index] = alphabet[rand.N(len(alphabet))]
+		}
+		id := string(candidate[:])
+		if !slices.ContainsFunc(sessions, func(session *session) bool { return session.ID == id }) {
+			return id
+		}
 	}
-	return hex.EncodeToString(bytes), nil
 }
