@@ -1,0 +1,184 @@
+//go:build linux || darwin
+
+package main
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"strings"
+	"time"
+
+	"golang.org/x/sys/unix"
+)
+
+type runResult struct {
+	Session  string        `json:"session"`
+	Mode     executionMode `json:"mode"`
+	Stdout   *string       `json:"stdout,omitempty"`
+	Stderr   *string       `json:"stderr,omitempty"`
+	Output   *string       `json:"output,omitempty"`
+	ExitCode *int          `json:"exit_code"`
+	TimedOut bool          `json:"timed_out"`
+}
+
+func injectSSH(command string, options ...string) (string, error) {
+	if len(command) < 4 || !strings.HasPrefix(command, "ssh") {
+		return "", errors.New("ssh command must start with 'ssh ' and include a destination")
+	}
+	separator := command[3]
+	if (separator != ' ' && separator != '\t') || strings.TrimSpace(command[3:]) == "" {
+		return "", errors.New("ssh command must start with 'ssh ' and include a destination")
+	}
+
+	quoted := make([]string, len(options))
+	for index, option := range options {
+		quoted[index] = shellQuote(option)
+	}
+	return "ssh " + strings.Join(quoted, " ") + command[3:], nil
+}
+
+func validateOpenCommand(command string) error {
+	_, err := injectSSH(command)
+	return err
+}
+
+func shellQuote(value string) string {
+	if value == "" {
+		return "''"
+	}
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
+}
+
+func masterCommand(session *session) (string, error) {
+	return injectSSH(session.Command, "-M", "-S", session.Platform.ControlPath, "-tt")
+}
+
+func downstreamCommand(session *session) (string, error) {
+	options := []string{
+		"-S", session.Platform.ControlPath,
+		"-o", "ControlMaster=no",
+		"-o", "BatchMode=yes",
+		"-o", "ProxyCommand=false",
+	}
+	if session.Mode == modeShellPTY {
+		options = append(options, "-tt")
+	}
+	return injectSSH(session.Command, options...)
+}
+
+func controlCommand(session *session, operation string) (string, error) {
+	return injectSSH(session.Command,
+		"-S", session.Platform.ControlPath,
+		"-O", operation,
+		"-o", "BatchMode=yes",
+	)
+}
+
+func executeSession(session *session, remoteCommand string, timeout time.Duration) (runResult, error) {
+	if strings.TrimSpace(remoteCommand) == "" {
+		return runResult{}, errors.New("command must not be empty")
+	}
+	if strings.ContainsRune(remoteCommand, 0) {
+		return runResult{}, errors.New("command must not contain NUL")
+	}
+	if err := checkSession(session); err != nil {
+		return runResult{}, err
+	}
+
+	command, err := downstreamCommand(session)
+	if err != nil {
+		return runResult{}, err
+	}
+	result := runResult{Session: session.ID, Mode: session.Mode}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", "exec "+command)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if session.Mode == modeExec {
+		command += " " + shellQuote(remoteCommand)
+		cmd = exec.CommandContext(ctx, "/bin/sh", "-c", "exec "+command)
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+	} else {
+		cmd.Stdin = strings.NewReader(strings.TrimRight(remoteCommand, "\n") + "\nexit\n")
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stdout
+	}
+	err = cmd.Run()
+	if session.Mode == modeExec {
+		stdoutText, stderrText := stdout.String(), stderr.String()
+		result.Stdout, result.Stderr = &stdoutText, &stderrText
+	} else {
+		output := stdout.String()
+		result.Output = &output
+	}
+
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		result.TimedOut = true
+		return result, nil
+	}
+	if err == nil {
+		exitCode := 0
+		result.ExitCode = &exitCode
+		return result, nil
+	}
+	if exitError, ok := errors.AsType[*exec.ExitError](err); ok {
+		exitCode := exitError.ExitCode()
+		result.ExitCode = &exitCode
+		return result, nil
+	}
+	return runResult{}, err
+}
+
+func checkSession(session *session) error {
+	command, err := controlCommand(session, "check")
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	output, err := exec.CommandContext(ctx, "/bin/sh", "-c", "exec "+command).CombinedOutput()
+	if err == nil {
+		return nil
+	}
+	message := strings.TrimSpace(string(output))
+	if message == "" {
+		message = err.Error()
+	}
+	return &sessionUnavailableError{message: fmt.Sprintf("session %s is unavailable: %s", session.ID, message)}
+}
+
+func closeSession(session *session) error {
+	if command, err := controlCommand(session, "exit"); err == nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = exec.CommandContext(ctx, "/bin/sh", "-c", "exec "+command).Run()
+		cancel()
+	}
+
+	if processAlive(session.PID) {
+		if err := unix.Kill(session.PID, unix.SIGTERM); err != nil && !errors.Is(err, unix.ESRCH) {
+			return err
+		}
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for processAlive(session.PID) && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if processAlive(session.PID) {
+		return fmt.Errorf("session %s did not close", session.ID)
+	}
+	return nil
+}
+
+func terminateProcess(process *os.Process) {
+	if process == nil {
+		return
+	}
+	_ = process.Signal(unix.SIGTERM)
+}
