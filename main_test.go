@@ -13,7 +13,7 @@ func TestHelp(t *testing.T) {
 		want string
 	}{
 		{name: "root flag", args: []string{"--help"}, want: "ssh-handoff open"},
-		{name: "help command", args: []string{"help", "run"}, want: runUsage},
+		{name: "subcommand long flag", args: []string{"run", "--help"}, want: runUsage},
 		{name: "subcommand flag", args: []string{"open", "-h"}, want: openUsage},
 	}
 

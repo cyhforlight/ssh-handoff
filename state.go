@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"time"
 )
 
 type executionMode string
@@ -28,12 +27,11 @@ const (
 )
 
 type sessionInfo struct {
-	ID        string        `json:"id"`
-	Command   string        `json:"connection_command"`
-	Note      string        `json:"note,omitempty"`
-	Mode      executionMode `json:"mode"`
-	State     sessionState  `json:"state"`
-	StartedAt time.Time     `json:"started_at"`
+	ID      string        `json:"id"`
+	Command string        `json:"connection_command"`
+	Note    string        `json:"note,omitempty"`
+	Mode    executionMode `json:"mode"`
+	State   sessionState  `json:"state"`
 }
 
 type session struct {
@@ -67,7 +65,7 @@ func openRegistry() (*sessionRegistry, error) {
 func (registry *sessionRegistry) create(note string, mode executionMode, command string) (*session, error) {
 	var created *session
 	err := withFileLock(filepath.Join(registry.dir, ".registry.lock"), func() error {
-		sessions, err := registry.loadLive()
+		sessions, err := registry.list()
 		if err != nil {
 			return err
 		}
@@ -75,12 +73,11 @@ func (registry *sessionRegistry) create(note string, mode executionMode, command
 		id := newSessionID(sessions)
 		created = &session{
 			sessionInfo: sessionInfo{
-				ID:        id,
-				Command:   command,
-				Note:      note,
-				Mode:      mode,
-				State:     stateStarting,
-				StartedAt: time.Now().UTC(),
+				ID:      id,
+				Command: command,
+				Note:    note,
+				Mode:    mode,
+				State:   stateStarting,
 			},
 			Platform: newPlatformSessionState(registry.dir, id),
 			PID:      os.Getpid(),
@@ -96,7 +93,7 @@ func (registry *sessionRegistry) update(session *session) error {
 
 func (registry *sessionRegistry) resolve(id string) (*session, error) {
 	id = strings.ToUpper(id)
-	sessions, err := registry.loadLive()
+	sessions, err := registry.list()
 	if err != nil {
 		return nil, err
 	}
@@ -106,17 +103,6 @@ func (registry *sessionRegistry) resolve(id string) (*session, error) {
 		}
 	}
 	return nil, fmt.Errorf("%w: %s", errSessionNotFound, id)
-}
-
-func (registry *sessionRegistry) list() ([]*session, error) {
-	live, err := registry.loadLive()
-	if err != nil {
-		return nil, err
-	}
-	slices.SortFunc(live, func(a, b *session) int {
-		return a.StartedAt.Compare(b.StartedAt)
-	})
-	return live, nil
 }
 
 func (registry *sessionRegistry) withSessionLock(id string, action func() error) error {
@@ -174,7 +160,7 @@ func (registry *sessionRegistry) loadAll() ([]*session, error) {
 	return sessions, nil
 }
 
-func (registry *sessionRegistry) loadLive() ([]*session, error) {
+func (registry *sessionRegistry) list() ([]*session, error) {
 	sessions, err := registry.loadAll()
 	if err != nil {
 		return nil, err

@@ -52,19 +52,8 @@ func main() {
 
 func runCLI(args []string, stdin *os.File, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		writeText(stderr, "usage: ssh-handoff <open|run|list|close|help> ...\n")
+		writeText(stderr, "usage: ssh-handoff <open|run|list|close> ...\n")
 		return 2
-	}
-	if args[0] == "help" {
-		if len(args) > 2 {
-			writeText(stderr, "usage: ssh-handoff help [command]\n")
-			return 2
-		}
-		command := ""
-		if len(args) == 2 {
-			command = args[1]
-		}
-		return writeHelp(command, stdout, stderr)
 	}
 	if len(args) == 1 && isHelpFlag(args[0]) {
 		return writeHelp("", stdout, stderr)
@@ -238,7 +227,6 @@ func helpText(command string) (string, bool) {
   ` + runUsage + `
   ` + listUsage + `
   ` + closeUsage + `
-  ssh-handoff help [command]
 
 命令:
   open   建立连接并保持原始 Shell
@@ -246,7 +234,7 @@ func helpText(command string) (string, bool) {
   list   列出仍然存活的 session
   close  关闭指定 session
 
-使用 "ssh-handoff help <command>" 查看子命令帮助。
+使用 "ssh-handoff <command> --help" 查看子命令帮助。
 `, true
 	case "open":
 		return `建立 SSH 连接，由用户完成认证并保持原始 Shell。
