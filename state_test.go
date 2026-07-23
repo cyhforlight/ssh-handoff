@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
@@ -33,13 +34,19 @@ func TestRegistryPersistsSessionAndPublishesInfo(t *testing.T) {
 	if code := listCommand(registry, nil, &output); code != 0 {
 		t.Fatalf("listCommand() code = %d, output = %s", code, output.String())
 	}
-	json := output.String()
+	outputText := output.String()
 	for _, privateField := range []string{"control_path", "pid"} {
-		if strings.Contains(json, `"`+privateField+`"`) {
-			t.Errorf("list output exposes private field %q: %s", privateField, json)
+		if strings.Contains(outputText, `"`+privateField+`"`) {
+			t.Errorf("list output exposes private field %q: %s", privateField, outputText)
 		}
 	}
-	if !strings.Contains(json, `"connection_command":"ssh jump-alias"`) || !strings.Contains(json, `"note":"production"`) || !strings.Contains(json, `"state":"managed"`) {
-		t.Fatalf("list output is missing public state: %s", json)
+	var response struct {
+		Sessions []sessionInfo `json:"sessions"`
+	}
+	if err := json.Unmarshal(output.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Sessions) != 1 || !reflect.DeepEqual(response.Sessions[0], created.sessionInfo) {
+		t.Fatalf("list output is missing public state: %s", outputText)
 	}
 }

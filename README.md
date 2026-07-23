@@ -111,13 +111,26 @@ ssh-handoff close A3B4
 `run`、`list` 和 `close` 面向 Agent 输出 JSON。默认 `exec` 的结果示例：
 
 ```json
-{"session":"A3B4","mode":"exec","stdout":"server\n","stderr":"","exit_code":0,"timed_out":false}
+{
+  "session": "A3B4",
+  "mode": "exec",
+  "stdout": "server\n",
+  "stderr": "",
+  "exit_code": 0,
+  "timed_out": false
+}
 ```
 
 `shell-pty` 使用单一 `output` 字段：
 
 ```json
-{"session":"A3B4","mode":"shell-pty","output":"server\r\n","exit_code":0,"timed_out":false}
+{
+  "session": "A3B4",
+  "mode": "shell-pty",
+  "output": "server\r\n",
+  "exit_code": 0,
+  "timed_out": false
+}
 ```
 
 命令超时返回状态码 124。参数、session 和本地执行错误以结构化 JSON 返回。

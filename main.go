@@ -322,6 +322,7 @@ func writeJSONError(stdout io.Writer, code string, err error) int {
 func writeJSON(output io.Writer, value any) {
 	encoder := json.NewEncoder(output)
 	encoder.SetEscapeHTML(false)
+	encoder.SetIndent("", "  ")
 	_ = encoder.Encode(value)
 }
 
