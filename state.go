@@ -95,6 +95,7 @@ func (registry *sessionRegistry) update(session *session) error {
 }
 
 func (registry *sessionRegistry) resolve(id string) (*session, error) {
+	id = strings.ToUpper(id)
 	sessions, err := registry.loadLive()
 	if err != nil {
 		return nil, err

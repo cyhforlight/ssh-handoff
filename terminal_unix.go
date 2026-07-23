@@ -154,12 +154,12 @@ func serveOpenSession(registry *sessionRegistry, session *session, stdin *os.Fil
 				session.State = stateManaged
 				keepalive = time.NewTicker(keepaliveInterval)
 				keepaliveTick = keepalive.C
-				writeText(stderr, "\r\n[ssh-handoff] 已托管；按 Ctrl-] 恢复交互。\r\n")
+				writeTextf(stderr, "\r\n[ssh-handoff] %s 已托管；按 Ctrl-] 恢复交互。\r\n", session.ID)
 			} else {
 				session.State = stateInteractive
 				keepalive = nil
 				keepaliveTick = nil
-				writeText(stderr, "\r\n[ssh-handoff] 已恢复交互；按 Ctrl-] 再次托管。\r\n")
+				writeTextf(stderr, "\r\n[ssh-handoff] %s 已恢复交互；按 Ctrl-] 再次托管。\r\n", session.ID)
 			}
 			if err := registry.update(session); err != nil {
 				terminateProcess(cmd.Process)

@@ -21,7 +21,7 @@ func TestRegistryPersistsSessionAndPublishesInfo(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	loaded, err := registry.resolve(created.ID)
+	loaded, err := registry.resolve(strings.ToLower(created.ID))
 	if err != nil {
 		t.Fatal(err)
 	}
