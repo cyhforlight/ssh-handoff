@@ -1,4 +1,4 @@
-module ssh-handoff
+module github.com/cyhforlight/ssh-handoff
 
 go 1.26
 

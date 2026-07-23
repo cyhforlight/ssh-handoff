@@ -1,19 +1,18 @@
 # ssh-handoff
 
 ssh-handoff 让用户先在真实终端中完成 SSH 认证，再把已经授权的连接交给 Agent 复用。
-它不会接收、保存或代填密码、密钥口令和 MFA 信息。
 
-当前支持 Linux、macOS 和 WSL，依赖系统 OpenSSH。原生 Windows 尚未实现。
+当前支持 Linux、macOS 和 WSL，依赖系统 OpenSSH。尚未支持原生 Windows。
 
 ## 安装
 
-需要 Go 1.26 或更新版本，以及支持连接复用的系统 `ssh`：
+需要 Go 1.26 或更新版本，以及支持连接复用的系统 `ssh`。可以直接安装最新版：
 
 ```sh
-go install .
+go install github.com/cyhforlight/ssh-handoff@latest
 ```
 
-也可以在仓库中直接构建：
+也可以克隆仓库后在源码目录中构建：
 
 ```sh
 go build -o ssh-handoff .
