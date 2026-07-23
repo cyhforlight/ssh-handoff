@@ -12,6 +12,13 @@ import (
 
 const defaultTimeout = time.Minute
 
+const (
+	openUsage  = "ssh-handoff open [--note NOTE] [--mode exec|shell-pty] 'ssh ...'"
+	runUsage   = "ssh-handoff run [--timeout DURATION] <session-id> '<command>'"
+	listUsage  = "ssh-handoff list"
+	closeUsage = "ssh-handoff close <session-id>"
+)
+
 type sessionUnavailableError struct {
 	message string
 }
@@ -45,8 +52,25 @@ func main() {
 
 func runCLI(args []string, stdin *os.File, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		writeText(stderr, "usage: ssh-handoff <open|run|list|close> ...\n")
+		writeText(stderr, "usage: ssh-handoff <open|run|list|close|help> ...\n")
 		return 2
+	}
+	if args[0] == "help" {
+		if len(args) > 2 {
+			writeText(stderr, "usage: ssh-handoff help [command]\n")
+			return 2
+		}
+		command := ""
+		if len(args) == 2 {
+			command = args[1]
+		}
+		return writeHelp(command, stdout, stderr)
+	}
+	if len(args) == 1 && isHelpFlag(args[0]) {
+		return writeHelp("", stdout, stderr)
+	}
+	if len(args) == 2 && isHelpFlag(args[1]) {
+		return writeHelp(args[0], stdout, stderr)
 	}
 
 	registry, err := openRegistry()
@@ -79,7 +103,7 @@ func openCommand(registry *sessionRegistry, args []string, stdin *os.File, stdou
 		return 2
 	}
 	if flags.NArg() != 1 {
-		writeText(stderr, "usage: ssh-handoff open [--note NOTE] [--mode exec|shell-pty] 'ssh ...'\n")
+		writeTextf(stderr, "usage: %s\n", openUsage)
 		return 2
 	}
 
@@ -118,7 +142,7 @@ func runCommand(registry *sessionRegistry, args []string, stdout io.Writer) int 
 		return writeJSONError(stdout, "invalid_arguments", err)
 	}
 	if flags.NArg() != 2 {
-		return writeJSONError(stdout, "invalid_arguments", errors.New("usage: ssh-handoff run [--timeout DURATION] <session-id> '<command>'"))
+		return writeJSONError(stdout, "invalid_arguments", errors.New("usage: "+runUsage))
 	}
 	if *timeout <= 0 {
 		return writeJSONError(stdout, "invalid_arguments", errors.New("timeout must be greater than zero"))
@@ -153,7 +177,7 @@ func runCommand(registry *sessionRegistry, args []string, stdout io.Writer) int 
 
 func listCommand(registry *sessionRegistry, args []string, stdout io.Writer) int {
 	if len(args) != 0 {
-		return writeJSONError(stdout, "invalid_arguments", errors.New("usage: ssh-handoff list"))
+		return writeJSONError(stdout, "invalid_arguments", errors.New("usage: "+listUsage))
 	}
 	sessions, err := registry.list()
 	if err != nil {
@@ -171,7 +195,7 @@ func listCommand(registry *sessionRegistry, args []string, stdout io.Writer) int
 
 func closeCommand(registry *sessionRegistry, args []string, stdout io.Writer) int {
 	if len(args) != 1 {
-		return writeJSONError(stdout, "invalid_arguments", errors.New("usage: ssh-handoff close <session-id>"))
+		return writeJSONError(stdout, "invalid_arguments", errors.New("usage: "+closeUsage))
 	}
 	session, err := registry.resolve(args[0])
 	if err != nil {
@@ -188,6 +212,84 @@ func closeCommand(registry *sessionRegistry, args []string, stdout io.Writer) in
 		Closed  bool   `json:"closed"`
 	}{Session: session.ID, Closed: true})
 	return 0
+}
+
+func isHelpFlag(argument string) bool {
+	return argument == "-h" || argument == "--help"
+}
+
+func writeHelp(command string, stdout, stderr io.Writer) int {
+	text, ok := helpText(command)
+	if !ok {
+		writeTextf(stderr, "ssh-handoff: unknown command %q\n", command)
+		return 2
+	}
+	writeText(stdout, text)
+	return 0
+}
+
+func helpText(command string) (string, bool) {
+	switch command {
+	case "":
+		return `ssh-handoff 复用由用户完成认证的 SSH 连接，供 Agent 执行命令。
+
+用法:
+  ` + openUsage + `
+  ` + runUsage + `
+  ` + listUsage + `
+  ` + closeUsage + `
+  ssh-handoff help [command]
+
+命令:
+  open   建立连接并保持原始 Shell
+  run    通过指定 session 执行一条命令
+  list   列出仍然存活的 session
+  close  关闭指定 session
+
+使用 "ssh-handoff help <command>" 查看子命令帮助。
+`, true
+	case "open":
+		return `建立 SSH 连接，由用户完成认证并保持原始 Shell。
+
+用法:
+  ` + openUsage + `
+
+选项:
+  --note NOTE     添加用于辨认 session 的备注
+  --mode MODE     执行模式：exec（默认）或 shell-pty
+
+进入空闲 Shell 后按 Ctrl-] 切换托管；再次按下恢复交互。
+`, true
+	case "run":
+		return `通过已有 session 的新 channel 同步执行一条命令。
+
+用法:
+  ` + runUsage + `
+
+选项:
+  --timeout DURATION   超时时间（默认 1m）
+
+session ID 输入不区分大小写。执行模式由 open 时的 --mode 决定。
+`, true
+	case "list":
+		return `列出仍然存活的 session。
+
+用法:
+  ` + listUsage + `
+
+结果以 JSON 输出。
+`, true
+	case "close":
+		return `关闭指定 session。
+
+用法:
+  ` + closeUsage + `
+
+session ID 输入不区分大小写，结果以 JSON 输出。
+`, true
+	default:
+		return "", false
+	}
 }
 
 func writeCommandError(command string, stdout, stderr io.Writer, err error) int {
