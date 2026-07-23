@@ -41,21 +41,18 @@ func ensurePrivateDirectory(path string) error {
 	if err := os.MkdirAll(path, 0o700); err != nil {
 		return err
 	}
-	info, err := os.Lstat(path)
-	if err != nil {
+	var stat unix.Stat_t
+	if err := unix.Lstat(path, &stat); err != nil {
 		return err
 	}
-	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+	if stat.Mode&unix.S_IFMT != unix.S_IFDIR {
 		return fmt.Errorf("runtime path is not a directory: %s", path)
 	}
-	stat, ok := info.Sys().(*unix.Stat_t)
-	if !ok || stat.Uid != uint32(os.Getuid()) {
+	if stat.Uid != uint32(os.Getuid()) {
 		return fmt.Errorf("runtime directory is not owned by the current user: %s", path)
 	}
-	if info.Mode().Perm() != 0o700 {
-		if err := os.Chmod(path, 0o700); err != nil {
-			return err
-		}
+	if stat.Mode&0o777 != 0o700 {
+		return os.Chmod(path, 0o700)
 	}
 	return nil
 }
