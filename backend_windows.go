@@ -15,7 +15,7 @@ import (
 )
 
 var errInvalidSSHCommand = errors.New(
-	"Windows Plink backend requires: ssh [-4|-6] [-C] [-i FILE] [-l USER] [-p PORT] USER@HOST",
+	"the Windows Plink backend requires: ssh [-4|-6] [-C] [-i FILE] [-l USER] [-p PORT] USER@HOST",
 )
 
 const childIOWaitDelay = 100 * time.Millisecond
@@ -122,7 +122,7 @@ func parsePlinkTarget(command string) (plinkTarget, error) {
 	}
 	if target.User == "" {
 		return plinkTarget{}, errors.New(
-			"Windows Plink backend requires an explicit SSH user (-l USER or USER@HOST)",
+			"the Windows Plink backend requires an explicit SSH user (-l USER or USER@HOST)",
 		)
 	}
 	return target, nil
@@ -178,7 +178,6 @@ func splitSSHCommand(command string) ([]string, error) {
 	var token strings.Builder
 	started := false
 	quote := byte(0)
-	escaped := false
 	flush := func() {
 		if !started {
 			return
@@ -190,12 +189,6 @@ func splitSSHCommand(command string) ([]string, error) {
 
 	for index := 0; index < len(command); index++ {
 		character := command[index]
-		if escaped {
-			token.WriteByte(character)
-			started = true
-			escaped = false
-			continue
-		}
 		switch quote {
 		case '\'':
 			if character == '\'' {
@@ -212,7 +205,8 @@ func splitSSHCommand(command string) ([]string, error) {
 			case '\\':
 				started = true
 				if index+1 < len(command) && command[index+1] == '"' {
-					escaped = true
+					index++
+					token.WriteByte(command[index])
 				} else {
 					token.WriteByte(character)
 				}
@@ -233,7 +227,8 @@ func splitSSHCommand(command string) ([]string, error) {
 					" \t'\"",
 					rune(command[index+1]),
 				) {
-					escaped = true
+					index++
+					token.WriteByte(command[index])
 				} else {
 					token.WriteByte(character)
 				}
@@ -242,9 +237,6 @@ func splitSSHCommand(command string) ([]string, error) {
 				started = true
 			}
 		}
-	}
-	if escaped {
-		return nil, errors.New("SSH command ends with an incomplete escape")
 	}
 	if quote != 0 {
 		return nil, errors.New("SSH command contains an unclosed quote")
@@ -310,7 +302,7 @@ func plinkTargetArgs(target plinkTarget, includeIdentity bool) []string {
 
 func plinkMasterArgs(session *session, target plinkTarget) []string {
 	arguments := []string{
-		"-load", plinkProfileName(session.ID, "upstream"),
+		"-load", plinkProfileName(session.ID, plinkProfileUpstream),
 		"-ssh",
 		"-share",
 		"-t",
@@ -320,7 +312,7 @@ func plinkMasterArgs(session *session, target plinkTarget) []string {
 
 func plinkDownstreamArgs(session *session, target plinkTarget, commandFile string) []string {
 	arguments := []string{
-		"-load", plinkProfileName(session.ID, "downstream"),
+		"-load", plinkProfileName(session.ID, plinkProfileDownstream),
 		"-ssh",
 		"-share",
 		"-batch",
@@ -368,7 +360,7 @@ func writePlinkCommandFile(dir, remoteCommand string) (string, error) {
 
 func plinkShareExistsArgs(session *session, target plinkTarget) []string {
 	arguments := []string{
-		"-load", plinkProfileName(session.ID, "downstream"),
+		"-load", plinkProfileName(session.ID, plinkProfileDownstream),
 		"-ssh",
 		"-shareexists",
 	}
@@ -505,14 +497,6 @@ func executeSession(
 		return status, nil
 	}
 	return runStatus{}, err
-}
-
-func checkSession(session *session) error {
-	target, err := parsePlinkTarget(session.Command)
-	if err != nil {
-		return err
-	}
-	return checkSessionTarget(session, target)
 }
 
 func checkSessionTarget(session *session, target plinkTarget) error {

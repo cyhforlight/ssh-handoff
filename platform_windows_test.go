@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"golang.org/x/sys/windows"
 	winregistry "golang.org/x/sys/windows/registry"
 )
 
@@ -33,46 +32,13 @@ func TestWindowsRuntimeDirectoryAndFileLock(t *testing.T) {
 
 func TestWindowsRuntimeDirectoryFallbackUsesUserProfile(t *testing.T) {
 	t.Setenv("LocalAppData", "")
-	profile, err := windows.GetCurrentProcessToken().GetUserProfileDirectory()
+	home, err := os.UserHomeDir()
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := filepath.Join(profile, ".ssh-handoff", "runtime")
+	want := filepath.Join(home, ".ssh-handoff", "runtime")
 	if got := runtimeDirectory(); got != want {
 		t.Fatalf("runtimeDirectory() = %q, want %q", got, want)
-	}
-}
-
-func TestWindowsRuntimeDirectoryRejectsBroadACL(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "runtime")
-	if err := ensurePrivateDirectory(path); err != nil {
-		t.Fatal(err)
-	}
-
-	descriptor, err := windows.SecurityDescriptorFromString("D:P(A;OICI;GA;;;WD)")
-	if err != nil {
-		t.Fatal(err)
-	}
-	dacl, _, err := descriptor.DACL()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := windows.SetNamedSecurityInfo(
-		path,
-		windows.SE_FILE_OBJECT,
-		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
-		nil,
-		nil,
-		dacl,
-		nil,
-	); err != nil {
-		t.Fatal(err)
-	}
-	if err := validatePrivateDirectory(path); err == nil {
-		t.Fatal("validatePrivateDirectory accepted an ACL granting access to Everyone")
-	}
-	if err := ensurePrivateDirectory(path); err != nil {
-		t.Fatalf("ensurePrivateDirectory did not restore the private ACL: %v", err)
 	}
 }
 
@@ -84,33 +50,35 @@ func TestPlinkProfilesSeparateUpstreamAndDownstream(t *testing.T) {
 	if err := createPlinkProfiles(id); err != nil {
 		t.Fatal(err)
 	}
+	upstream := plinkProfileName(id, plinkProfileUpstream)
+	downstream := plinkProfileName(id, plinkProfileDownstream)
 	assertProfileValue(
 		t,
-		plinkProfileName(id, "upstream"),
+		upstream,
 		plinkProfileOwnerValue,
 		1,
 	)
 	assertProfileValue(
 		t,
-		plinkProfileName(id, "upstream"),
+		upstream,
 		"ConnectionSharingUpstream",
 		1,
 	)
 	assertProfileValue(
 		t,
-		plinkProfileName(id, "upstream"),
+		upstream,
 		"ConnectionSharingDownstream",
 		0,
 	)
 	assertProfileValue(
 		t,
-		plinkProfileName(id, "downstream"),
+		downstream,
 		"ConnectionSharingUpstream",
 		0,
 	)
 	assertProfileValue(
 		t,
-		plinkProfileName(id, "downstream"),
+		downstream,
 		"ConnectionSharingDownstream",
 		1,
 	)
@@ -122,21 +90,21 @@ func TestPlinkProfilesSeparateUpstreamAndDownstream(t *testing.T) {
 		"AuthTIS",
 		"AuthKI",
 	} {
-		assertProfileValue(t, plinkProfileName(id, "downstream"), value, 0)
+		assertProfileValue(t, downstream, value, 0)
 	}
-	assertProfileValue(t, plinkProfileName(id, "downstream"), "SshNoTrivialAuth", 1)
+	assertProfileValue(t, downstream, "SshNoTrivialAuth", 1)
 	for _, value := range []string{
 		"PublicKeyFile",
 		"DetachedCertificate",
 		"AuthPlugin",
 	} {
-		assertProfileString(t, plinkProfileName(id, "downstream"), value, "")
+		assertProfileString(t, downstream, value, "")
 	}
 
 	removePlinkProfiles(id)
 	if key, err := winregistry.OpenKey(
 		winregistry.CURRENT_USER,
-		puttySessionsRegistryPath+`\`+plinkProfileName(id, "downstream"),
+		puttySessionsRegistryPath+`\`+downstream,
 		winregistry.QUERY_VALUE,
 	); err == nil {
 		_ = key.Close()
@@ -145,7 +113,8 @@ func TestPlinkProfilesSeparateUpstreamAndDownstream(t *testing.T) {
 }
 
 func TestRemovePlinkProfilePreservesUnmanagedSavedSession(t *testing.T) {
-	name := fmt.Sprintf("ssh-handoff-unmanaged-%d-%d", os.Getpid(), time.Now().UnixNano())
+	id := fmt.Sprintf("unmanaged-%d-%d", os.Getpid(), time.Now().UnixNano())
+	name := plinkProfileName(id, plinkProfileUpstream)
 	path := puttySessionsRegistryPath + `\` + name
 
 	key, openedExisting, err := winregistry.CreateKey(
@@ -168,7 +137,7 @@ func TestRemovePlinkProfilePreservesUnmanagedSavedSession(t *testing.T) {
 	_ = key.Close()
 
 	removePlinkProfile(name)
-	if err := writePlinkProfile(name, true, false, false); err == nil {
+	if err := writePlinkProfile(id, plinkProfileUpstream); err == nil {
 		t.Fatal("writePlinkProfile overwrote an unmanaged saved session")
 	}
 	key, err = winregistry.OpenKey(

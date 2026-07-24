@@ -16,12 +16,11 @@ type windowsPTY struct {
 	Input  *os.File
 	Output *os.File
 
-	console    windows.Handle
-	process    windows.Handle
-	job        windows.Handle
-	pid        int
-	consoleEnd sync.Once
-	consoleMu  sync.RWMutex
+	console   windows.Handle
+	process   windows.Handle
+	job       windows.Handle
+	pid       int
+	consoleMu sync.Mutex
 }
 
 func startWindowsPTY(path string, arguments []string, width, height int) (*windowsPTY, error) {
@@ -222,8 +221,8 @@ func (terminal *windowsPTY) PID() int {
 }
 
 func (terminal *windowsPTY) Resize(width, height int) error {
-	terminal.consoleMu.RLock()
-	defer terminal.consoleMu.RUnlock()
+	terminal.consoleMu.Lock()
+	defer terminal.consoleMu.Unlock()
 	if terminal.console == 0 {
 		return errors.New("ConPTY is closed")
 	}
@@ -234,32 +233,24 @@ func (terminal *windowsPTY) Resize(width, height int) error {
 }
 
 func (terminal *windowsPTY) Wait() (int, error) {
+	defer terminal.closeConsole()
+
 	result, err := windows.WaitForSingleObject(terminal.process, windows.INFINITE)
 	if err != nil {
-		terminal.closeConsole()
 		return 0, err
 	}
 	if result != windows.WAIT_OBJECT_0 {
-		terminal.closeConsole()
 		return 0, fmt.Errorf("wait for Plink returned status %d", result)
 	}
 	var exitCode uint32
 	if err := windows.GetExitCodeProcess(terminal.process, &exitCode); err != nil {
-		terminal.closeConsole()
 		return 0, err
 	}
-	terminal.closeConsole()
 	return int(exitCode), nil
 }
 
 func (terminal *windowsPTY) Terminate() {
-	if terminal.job != 0 {
-		_ = windows.TerminateJobObject(terminal.job, 1)
-		return
-	}
-	if terminal.process != 0 {
-		_ = windows.TerminateProcess(terminal.process, 1)
-	}
+	_ = windows.TerminateJobObject(terminal.job, 1)
 }
 
 func (terminal *windowsPTY) Close() {
@@ -281,12 +272,10 @@ func (terminal *windowsPTY) Close() {
 }
 
 func (terminal *windowsPTY) closeConsole() {
-	terminal.consoleEnd.Do(func() {
-		terminal.consoleMu.Lock()
-		defer terminal.consoleMu.Unlock()
-		if terminal.console != 0 {
-			windows.ClosePseudoConsole(terminal.console)
-			terminal.console = 0
-		}
-	})
+	terminal.consoleMu.Lock()
+	defer terminal.consoleMu.Unlock()
+	if terminal.console != 0 {
+		windows.ClosePseudoConsole(terminal.console)
+		terminal.console = 0
+	}
 }

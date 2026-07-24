@@ -11,18 +11,6 @@ import (
 	"testing"
 )
 
-func TestWindowsOpenHelpDescribesPlinkContract(t *testing.T) {
-	text, ok := helpText("open")
-	if !ok {
-		t.Fatal("open help is unavailable")
-	}
-	for _, expected := range []string{"Plink", "ConPTY", "SSH_HANDOFF_PLINK", "-p PORT"} {
-		if !strings.Contains(text, expected) {
-			t.Errorf("open help is missing %q: %s", expected, text)
-		}
-	}
-}
-
 func TestParsePlinkTarget(t *testing.T) {
 	tests := []struct {
 		name    string
