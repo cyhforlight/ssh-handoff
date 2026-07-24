@@ -63,8 +63,8 @@ close  按 ID 关闭指定 session
 为未托管调用增加警告。
 
 一个 `open` 进程对应一个 session；关闭窗口或进程即结束该 session。`list` 和 `close`
-用于发现及显式关闭已有 session。`run`、`list` 和 `close` 面向 Agent 返回结构化 JSON，
-具体字段留到实现时确定。
+用于发现及显式关闭已有 session。`run` 使用结构化 JSON 封装命令结果，`list` 以表格
+展示 session，`close` 返回一行确认文本。
 
 ## Session 模型
 

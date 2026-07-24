@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
@@ -30,23 +29,23 @@ func TestRegistryPersistsSessionAndPublishesInfo(t *testing.T) {
 		t.Fatalf("persisted session is incomplete: %#v", loaded)
 	}
 
-	var output bytes.Buffer
-	if code := listCommand(registry, nil, &output); code != 0 {
-		t.Fatalf("listCommand() code = %d, output = %s", code, output.String())
+	var stdout, stderr bytes.Buffer
+	if code := listCommand(registry, nil, &stdout, &stderr); code != 0 {
+		t.Fatalf("listCommand() code = %d, stderr = %s", code, stderr.String())
 	}
-	outputText := output.String()
-	for _, privateField := range []string{"control_path", "pid"} {
-		if strings.Contains(outputText, `"`+privateField+`"`) {
-			t.Errorf("list output exposes private field %q: %s", privateField, outputText)
+	if stderr.Len() != 0 {
+		t.Fatalf("listCommand() stderr = %s", stderr.String())
+	}
+	outputText := stdout.String()
+	for _, field := range []string{
+		created.ID,
+		string(created.State),
+		string(created.Mode),
+		created.Command,
+		created.Note,
+	} {
+		if !strings.Contains(outputText, field) {
+			t.Errorf("list output is missing %q: %s", field, outputText)
 		}
-	}
-	var response struct {
-		Sessions []sessionInfo `json:"sessions"`
-	}
-	if err := json.Unmarshal(output.Bytes(), &response); err != nil {
-		t.Fatal(err)
-	}
-	if len(response.Sessions) != 1 || !reflect.DeepEqual(response.Sessions[0], created.sessionInfo) {
-		t.Fatalf("list output is missing public state: %s", outputText)
 	}
 }

@@ -1,6 +1,6 @@
 # ssh-handoff
 
-用户在终端中建立的 SSH 连接属于该终端进程，Agent 无法直接使用。Agent 的每次命令调用都会启动独立进程，用户已经登录成功也不会为它提供可用的远端执行入口。
+用户在终端中建立的 SSH 连接由其中运行的 `ssh` 进程持有，Agent 无法直接使用。Agent 的每次命令调用都会启动独立进程，因此即使用户已经登录，Agent 也没有可复用的远端执行入口。
 
 ssh-handoff 将用户建立的 SSH 连接保存为本地可发现、可复用的 session。Agent 通过 session ID 复用同一条 OpenSSH transport，并为每条命令创建独立 channel；用户继续保留原始 Shell。
 
@@ -108,7 +108,7 @@ ssh-handoff close A3B4
 
 ## 工作模型
 
-一个 session 持有一条已经完成认证的 OpenSSH transport。这里的 transport 是底层 SSH 连接，一条连接可以同时承载多个相互独立的 channel：
+一个 session 持有一条已经完成认证的底层 SSH 连接（OpenSSH transport），它可以同时承载多个相互独立的 channel：
 
 ```text
 已认证的 OpenSSH transport
@@ -116,7 +116,7 @@ ssh-handoff close A3B4
 └── 命令 channel：每次 run 单独新建
 ```
 
-`run` 的命令和输出不会进入原始终端。每次 `run` 都是一次完整、同步、非交互的命令执行，调用方会等待该次结果，同一 session 的多次调用按顺序执行。命令 channel 在调用结束后关闭，不继承原始 Shell 或上一次 `run` 的工作目录、环境变量和历史状态。新 channel 的初始目录、环境和 Shell 初始化由远端 SSH 服务决定；需要共享状态的多个步骤应组合在同一个命令字符串中，并显式包含所需的 `cd` 和环境变量。托管状态的作用范围是原始 Shell channel。
+`run` 的命令和输出不会进入原始终端，托管状态只作用于原始 Shell channel。每次 `run` 都是一次完整、同步、非交互的命令执行，调用方会等待该次结果，同一 session 的多次调用按顺序执行。命令 channel 在调用结束后关闭，不继承原始 Shell 或上一次 `run` 的工作目录、环境变量和历史状态。新 channel 的初始目录、环境和 Shell 初始化由远端 SSH 服务决定；需要共享状态的多个步骤应组合在同一个命令字符串中，并显式包含所需的 `cd` 和环境变量。
 
 session 属于创建它的本地系统用户。Agent 需要以同一用户运行，并能访问相同的 runtime 目录和 OpenSSH control socket；未共享这些路径的容器、WSL 实例或其他隔离环境无法发现该 session。
 
@@ -130,21 +130,17 @@ PTY（pseudo-terminal，伪终端）让远端程序以连接到终端的方式�
 
 ### `shell-pty` session
 
-使用 `open --mode shell-pty` 创建此类 session。它的命令 channel 请求 PTY 并启动远端 Shell，再向 Shell 输入预先给定的工作命令和 `exit`。这里的交互式 Shell 是远端入口提供的 SSH channel 形式；ssh-handoff 不会在执行期间继续转发用户输入，因此工作命令仍须能够一次性、非交互地完成。需要持续输入、菜单操作或全屏终端的程序应在原始 Shell 中运行。
-
-```sh
-ssh-handoff open --mode shell-pty 'ssh ...'
-```
+使用 `open --mode shell-pty` 创建此类 session。它的命令 channel 请求 PTY 并启动远端 Shell，再向 Shell 输入预先给定的工作命令和 `exit`。这个 Shell 用于适配远端入口；ssh-handoff 不会在执行期间继续转发用户输入，因此工作命令仍须能够一次性、非交互地完成。需要持续输入、菜单操作或全屏终端的程序应在原始 Shell 中运行。
 
 ## 输出
-
-`run`、`list` 和 `close` 面向 Agent 输出 JSON。
 
 ### `run`
 
 `run` 的结果结构取决于 session 的执行模式。
 
 #### `exec`
+
+`exec` session 成功执行后的结果分别提供 `stdout` 和 `stderr` 字段：
 
 ```json
 {
@@ -161,7 +157,7 @@ ssh-handoff open --mode shell-pty 'ssh ...'
 
 #### `shell-pty`
 
-不同于 `exec`，`shell-pty` 使用单一的 `output` 字段：
+`shell-pty` session 成功执行后的结果使用单一的 `output` 字段：
 
 ```json
 {
@@ -175,36 +171,7 @@ ssh-handoff open --mode shell-pty 'ssh ...'
 
 `shell-pty` 的 `output` 记录该命令 channel 从 Shell 启动到关闭期间产生的完整终端流，可能包含启动信息、命令回显、提示符、工作命令输出、`exit` 回显和控制字符，具体内容由远端入口和 Shell 决定。`exit_code` 表示整个 PTY Shell 会话的退出状态，只用于辅助判断会话是否正常结束；该模式不提供工作命令的退出状态。
 
-### `list`
-
-```json
-{
-  "sessions": [
-    {
-      "id": "A3B4",
-      "connection_command": "ssh user@example.com",
-      "note": "生产环境",
-      "mode": "exec",
-      "state": "interactive"
-    }
-  ]
-}
-```
-
-`note` 为空时不会出现。`starting` 表示原始 SSH 进程正在启动；`interactive` 和 `managed` 表示原始 Shell 当前处于人工交互或托管状态。
-
-### `close`
-
-```json
-{
-  "session": "A3B4",
-  "closed": true
-}
-```
-
-### 错误与退出状态
-
-参数、session 和本地执行错误使用统一结构：
+`run` 的参数错误、session 相关错误和本地执行错误使用统一的 JSON 结构：
 
 ```json
 {
@@ -216,6 +183,29 @@ ssh-handoff open --mode shell-pty 'ssh ...'
 ```
 
 错误代码包括 `invalid_arguments`、`session_not_found`、`session_unavailable`、`execution_error` 和 `local_error`。`run` 超时时返回 `timed_out: true`，ssh-handoff 进程以状态码 124 退出。
+
+### `list`
+
+`list` 成功时输出表格，例如：
+
+```text
+ID    STATE        MODE  CONNECTION            NOTE
+A3B4  interactive  exec  ssh user@example.com  生产环境
+```
+
+`starting` 表示原始 SSH 进程正在启动；`interactive` 和 `managed` 表示原始 Shell 当前处于人工交互或托管状态。
+
+`list` 失败时将错误写入 stderr，并以非零状态退出。
+
+### `close`
+
+成功关闭 session 后输出：
+
+```text
+closed A3B4
+```
+
+`close` 失败时将错误写入 stderr，并以非零状态退出。
 
 ## Agent Prompt
 

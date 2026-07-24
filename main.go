@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
+	"text/tabwriter"
 	"time"
 )
 
@@ -64,7 +66,11 @@ func runCLI(args []string, stdin *os.File, stdout, stderr io.Writer) int {
 
 	registry, err := openRegistry()
 	if err != nil {
-		return writeCommandError(args[0], stdout, stderr, err)
+		if args[0] == "run" {
+			return writeJSONError(stdout, "local_error", err)
+		}
+		writeTextf(stderr, "ssh-handoff: %v\n", err)
+		return 2
 	}
 
 	switch args[0] {
@@ -73,9 +79,9 @@ func runCLI(args []string, stdin *os.File, stdout, stderr io.Writer) int {
 	case "run":
 		return runCommand(registry, args[1:], stdout)
 	case "list":
-		return listCommand(registry, args[1:], stdout)
+		return listCommand(registry, args[1:], stdout, stderr)
 	case "close":
-		return closeCommand(registry, args[1:], stdout)
+		return closeCommand(registry, args[1:], stdout, stderr)
 	default:
 		writeTextf(stderr, "ssh-handoff: unknown command %q\n", args[0])
 		return 2
@@ -139,7 +145,7 @@ func runCommand(registry *sessionRegistry, args []string, stdout io.Writer) int 
 
 	session, err := registry.resolve(flags.Arg(0))
 	if err != nil {
-		return writeSessionError(stdout, err)
+		return writeRunSessionError(stdout, err)
 	}
 
 	var result runResult
@@ -149,7 +155,7 @@ func runCommand(registry *sessionRegistry, args []string, stdout io.Writer) int 
 		return runErr
 	})
 	if err != nil {
-		return writeCommandFailure(stdout, err)
+		return writeRunExecutionError(stdout, err)
 	}
 	writeJSON(stdout, result)
 	if result.TimedOut {
@@ -164,42 +170,51 @@ func runCommand(registry *sessionRegistry, args []string, stdout io.Writer) int 
 	return 0
 }
 
-func listCommand(registry *sessionRegistry, args []string, stdout io.Writer) int {
+func listCommand(registry *sessionRegistry, args []string, stdout, stderr io.Writer) int {
 	if len(args) != 0 {
-		return writeJSONError(stdout, "invalid_arguments", errors.New("usage: "+listUsage))
+		writeTextf(stderr, "usage: %s\n", listUsage)
+		return 2
 	}
 	sessions, err := registry.list()
 	if err != nil {
-		return writeJSONError(stdout, "local_error", err)
+		writeTextf(stderr, "ssh-handoff list: %v\n", err)
+		return 2
 	}
-	summaries := make([]sessionInfo, len(sessions))
-	for index, session := range sessions {
-		summaries[index] = session.sessionInfo
+
+	writer := tabwriter.NewWriter(stdout, 0, 4, 2, ' ', 0)
+	writeText(writer, "ID\tSTATE\tMODE\tCONNECTION\tNOTE\n")
+	sanitize := strings.NewReplacer("\t", " ", "\r", " ", "\n", " ")
+	for _, session := range sessions {
+		writeTextf(writer, "%s\t%s\t%s\t%s\t%s\n",
+			session.ID,
+			session.State,
+			session.Mode,
+			sanitize.Replace(session.Command),
+			sanitize.Replace(session.Note),
+		)
 	}
-	writeJSON(stdout, struct {
-		Sessions []sessionInfo `json:"sessions"`
-	}{Sessions: summaries})
+	_ = writer.Flush()
 	return 0
 }
 
-func closeCommand(registry *sessionRegistry, args []string, stdout io.Writer) int {
+func closeCommand(registry *sessionRegistry, args []string, stdout, stderr io.Writer) int {
 	if len(args) != 1 {
-		return writeJSONError(stdout, "invalid_arguments", errors.New("usage: "+closeUsage))
+		writeTextf(stderr, "usage: %s\n", closeUsage)
+		return 2
 	}
 	session, err := registry.resolve(args[0])
 	if err != nil {
-		return writeSessionError(stdout, err)
+		writeTextf(stderr, "ssh-handoff close: %v\n", err)
+		return 2
 	}
 	err = registry.withSessionLock(session.ID, func() error {
 		return closeSession(session)
 	})
 	if err != nil {
-		return writeCommandFailure(stdout, err)
+		writeTextf(stderr, "ssh-handoff close: %v\n", err)
+		return 2
 	}
-	writeJSON(stdout, struct {
-		Session string `json:"session"`
-		Closed  bool   `json:"closed"`
-	}{Session: session.ID, Closed: true})
+	writeTextf(stdout, "closed %s\n", session.ID)
 	return 0
 }
 
@@ -265,7 +280,7 @@ session ID 输入不区分大小写。执行模式由 open 时的 --mode 决定�
 用法:
   ` + listUsage + `
 
-结果以 JSON 输出。
+结果以表格输出。
 `, true
 	case "close":
 		return `关闭指定 session。
@@ -273,29 +288,21 @@ session ID 输入不区分大小写。执行模式由 open 时的 --mode 决定�
 用法:
   ` + closeUsage + `
 
-session ID 输入不区分大小写，结果以 JSON 输出。
+session ID 输入不区分大小写。
 `, true
 	default:
 		return "", false
 	}
 }
 
-func writeCommandError(command string, stdout, stderr io.Writer, err error) int {
-	if command == "run" || command == "list" || command == "close" {
-		return writeJSONError(stdout, "local_error", err)
-	}
-	writeTextf(stderr, "ssh-handoff: %v\n", err)
-	return 2
-}
-
-func writeSessionError(stdout io.Writer, err error) int {
+func writeRunSessionError(stdout io.Writer, err error) int {
 	if errors.Is(err, errSessionNotFound) {
 		return writeJSONError(stdout, "session_not_found", err)
 	}
 	return writeJSONError(stdout, "local_error", err)
 }
 
-func writeCommandFailure(stdout io.Writer, err error) int {
+func writeRunExecutionError(stdout io.Writer, err error) int {
 	if _, ok := errors.AsType[*sessionUnavailableError](err); ok {
 		return writeJSONError(stdout, "session_unavailable", err)
 	}
