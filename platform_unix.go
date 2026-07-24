@@ -73,7 +73,7 @@ func privateDirectoryPermissions(path string) (uint32, error) {
 	if stat.Uid != uint32(os.Getuid()) {
 		return 0, fmt.Errorf("runtime directory is not owned by the current user: %s", path)
 	}
-	return stat.Mode & 0o777, nil
+	return uint32(stat.Mode & 0o777), nil
 }
 
 func withFileLock(path string, action func() error) error {
