@@ -3,7 +3,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -84,22 +83,27 @@ func runControlCommand(session *session, operation string) ([]byte, error) {
 	return shellCommandContext(ctx, command).CombinedOutput()
 }
 
-func executeSession(session *session, remoteCommand string, timeout time.Duration) (runResult, error) {
+func executeSession(
+	session *session,
+	remoteCommand string,
+	timeout time.Duration,
+	emit outputSink,
+) (runStatus, error) {
 	if strings.TrimSpace(remoteCommand) == "" {
-		return runResult{}, errors.New("command must not be empty")
+		return runStatus{}, errors.New("command must not be empty")
 	}
 	if strings.ContainsRune(remoteCommand, 0) {
-		return runResult{}, errors.New("command must not contain NUL")
+		return runStatus{}, errors.New("command must not contain NUL")
 	}
 	if err := checkSession(session); err != nil {
-		return runResult{}, err
+		return runStatus{}, err
 	}
 
 	command, err := downstreamCommand(session)
 	if err != nil {
-		return runResult{}, err
+		return runStatus{}, err
 	}
-	result := runResult{Session: session.ID, Mode: session.Mode}
+	status := runStatus{Session: session.ID, Mode: session.Mode}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
@@ -107,38 +111,36 @@ func executeSession(session *session, remoteCommand string, timeout time.Duratio
 		command += " " + shellQuote(remoteCommand)
 	}
 	cmd := shellCommandContext(ctx, command)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
+	streams := newSerializedOutput(emit)
 	if session.Mode == modeShellPTY {
 		cmd.Stdin = strings.NewReader(strings.TrimRight(remoteCommand, "\n") + "\nexit\n")
-		cmd.Stderr = &stdout
+		writer := streams.writer(streamOutput)
+		cmd.Stdout, cmd.Stderr = writer, writer
 	} else {
-		cmd.Stderr = &stderr
+		cmd.Stdout = streams.writer(streamStdout)
+		cmd.Stderr = streams.writer(streamStderr)
 	}
+	// Run waits for its output copies, so no emit call outlives it.
 	err = cmd.Run()
-	if session.Mode == modeExec {
-		stdoutText, stderrText := stdout.String(), stderr.String()
-		result.Stdout, result.Stderr = &stdoutText, &stderrText
-	} else {
-		output := stdout.String()
-		result.Output = &output
-	}
 
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		result.TimedOut = true
-		return result, nil
+		status.TimedOut = true
+		return status, nil
+	}
+	if outputErr := streams.failure(); outputErr != nil {
+		return runStatus{}, outputErr
 	}
 	if err == nil {
 		exitCode := 0
-		result.ExitCode = &exitCode
-		return result, nil
+		status.ExitCode = &exitCode
+		return status, nil
 	}
 	if exitError, ok := errors.AsType[*exec.ExitError](err); ok {
 		exitCode := exitError.ExitCode()
-		result.ExitCode = &exitCode
-		return result, nil
+		status.ExitCode = &exitCode
+		return status, nil
 	}
-	return runResult{}, err
+	return runStatus{}, err
 }
 
 func checkSession(session *session) error {

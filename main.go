@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -16,7 +15,7 @@ const defaultTimeout = time.Minute
 
 const (
 	openUsage  = "ssh-handoff open [--note NOTE] [--mode exec|shell-pty] 'ssh ...'"
-	runUsage   = "ssh-handoff run [--timeout DURATION] <session-id> <command|->"
+	runUsage   = "ssh-handoff run [--stream] [--timeout DURATION] <session-id> <command|->"
 	listUsage  = "ssh-handoff list"
 	closeUsage = "ssh-handoff close <session-id>"
 )
@@ -27,25 +26,6 @@ type sessionUnavailableError struct {
 
 func (err *sessionUnavailableError) Error() string {
 	return err.message
-}
-
-type commandError struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
-}
-
-type errorResponse struct {
-	Error commandError `json:"error"`
-}
-
-type runResult struct {
-	Session  string        `json:"session"`
-	Mode     executionMode `json:"mode"`
-	Stdout   *string       `json:"stdout,omitempty"`
-	Stderr   *string       `json:"stderr,omitempty"`
-	Output   *string       `json:"output,omitempty"`
-	ExitCode *int          `json:"exit_code"`
-	TimedOut bool          `json:"timed_out"`
 }
 
 func main() {
@@ -126,46 +106,50 @@ func runCommand(registry *sessionRegistry, args []string, stdin io.Reader, stdou
 	flags := flag.NewFlagSet("run", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	timeout := flags.Duration("timeout", defaultTimeout, "command timeout")
+	stream := flags.Bool("stream", false, "stream output as NDJSON")
 	if err := flags.Parse(args); err != nil {
-		return writeJSONError(stdout, "invalid_arguments", err)
+		return writeRunError(newRunOutput(stdout, *stream), "invalid_arguments", err)
 	}
+	output := newRunOutput(stdout, *stream)
 	if flags.NArg() != 2 {
-		return writeJSONError(stdout, "invalid_arguments", errors.New("usage: "+runUsage))
+		return writeRunError(output, "invalid_arguments", errors.New("usage: "+runUsage))
 	}
 	if *timeout <= 0 {
-		return writeJSONError(stdout, "invalid_arguments", errors.New("timeout must be greater than zero"))
+		return writeRunError(output, "invalid_arguments", errors.New("timeout must be greater than zero"))
 	}
 
 	session, err := registry.resolve(flags.Arg(0))
 	if err != nil {
-		return writeRunSessionError(stdout, err)
+		return writeRunSessionError(output, err)
 	}
 
 	command := flags.Arg(1)
 	if command == "-" {
 		data, err := io.ReadAll(stdin)
 		if err != nil {
-			return writeJSONError(stdout, "local_error", fmt.Errorf("read command from stdin: %w", err))
+			return writeRunError(output, "local_error", fmt.Errorf("read command from stdin: %w", err))
 		}
 		command = string(data)
 	}
 
-	var result runResult
+	var status runStatus
 	err = registry.withSessionLock(session.ID, func() error {
 		var runErr error
-		result, runErr = executeSession(session, command, *timeout)
+		status, runErr = executeSession(session, command, *timeout, output.emit)
 		return runErr
 	})
 	if err != nil {
-		return writeRunExecutionError(stdout, err)
+		return writeRunExecutionError(output, err)
 	}
-	writeJSON(stdout, result)
-	if result.TimedOut {
+	if err := output.writeResult(status); err != nil {
+		return 2
+	}
+	if status.TimedOut {
 		return 124
 	}
-	if result.ExitCode != nil && *result.ExitCode != 0 {
-		if *result.ExitCode > 0 && *result.ExitCode <= 255 {
-			return *result.ExitCode
+	if status.ExitCode != nil && *status.ExitCode != 0 {
+		if *status.ExitCode > 0 && *status.ExitCode <= 255 {
+			return *status.ExitCode
 		}
 		return 1
 	}
@@ -272,6 +256,7 @@ func helpText(command string) (string, bool) {
   ` + runUsage + `
 
 选项:
+  --stream             以 NDJSON 实时输出
   --timeout DURATION   超时时间（默认 1m）
 
 session ID 输入不区分大小写。执行模式由 open 时的 --mode 决定。
@@ -298,30 +283,23 @@ session ID 输入不区分大小写。
 	}
 }
 
-func writeRunSessionError(stdout io.Writer, err error) int {
+func writeRunSessionError(output runOutput, err error) int {
 	if errors.Is(err, errSessionNotFound) {
-		return writeJSONError(stdout, "session_not_found", err)
+		return writeRunError(output, "session_not_found", err)
 	}
-	return writeJSONError(stdout, "local_error", err)
+	return writeRunError(output, "local_error", err)
 }
 
-func writeRunExecutionError(stdout io.Writer, err error) int {
+func writeRunExecutionError(output runOutput, err error) int {
 	if _, ok := errors.AsType[*sessionUnavailableError](err); ok {
-		return writeJSONError(stdout, "session_unavailable", err)
+		return writeRunError(output, "session_unavailable", err)
 	}
-	return writeJSONError(stdout, "execution_error", err)
+	return writeRunError(output, "execution_error", err)
 }
 
-func writeJSONError(stdout io.Writer, code string, err error) int {
-	writeJSON(stdout, errorResponse{Error: commandError{Code: code, Message: err.Error()}})
+func writeRunError(output runOutput, code string, err error) int {
+	_ = output.writeError(code, err)
 	return 2
-}
-
-func writeJSON(output io.Writer, value any) {
-	encoder := json.NewEncoder(output)
-	encoder.SetEscapeHTML(false)
-	encoder.SetIndent("", "  ")
-	_ = encoder.Encode(value)
 }
 
 func writeText(output io.Writer, value string) {

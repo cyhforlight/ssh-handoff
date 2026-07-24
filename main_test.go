@@ -32,3 +32,18 @@ func TestHelp(t *testing.T) {
 		})
 	}
 }
+
+func TestRunStreamWritesNDJSONError(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := runCLI([]string{"run", "--stream"}, nil, &stdout, &stderr); code != 2 {
+		t.Fatalf("runCLI() code = %d, want 2", code)
+	}
+	want := "{\"type\":\"error\",\"error\":{\"code\":\"invalid_arguments\",\"message\":\"usage: " +
+		runUsage + "\"}}\n"
+	if got := stdout.String(); got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("run writes stderr: %s", stderr.String())
+	}
+}

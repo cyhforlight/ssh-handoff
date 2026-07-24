@@ -43,6 +43,7 @@ Agent 从另一个进程调用：
 
 ```sh
 ssh-handoff run <session-id> '<command>'
+ssh-handoff run --stream <session-id> '<long-running-command>'
 ssh-handoff run <session-id> - < script.sh
 ```
 
@@ -67,8 +68,9 @@ close  按 ID 关闭指定 session
 为未托管调用增加警告。
 
 一个 `open` 进程对应一个 session；关闭窗口或进程即结束该 session。`list` 和 `close`
-用于发现及显式关闭已有 session。`run` 使用结构化 JSON 封装命令结果，`list` 以表格
-展示 session，`close` 返回一行确认文本。
+用于发现及显式关闭已有 session。`run` 默认使用单个结构化 JSON 封装命令结果；可选的
+`--stream` 使用 NDJSON 在执行期间发送带来源的输出事件，并以唯一的结果或错误事件结束。
+流式终态不重复已经发送的输出。`list` 以表格展示 session，`close` 返回一行确认文本。
 
 ## Session 模型
 

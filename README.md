@@ -69,8 +69,8 @@ ssh-handoff open --mode shell-pty 'ssh jump-alias'
 ### `run`
 
 ```sh
-ssh-handoff run [--timeout DURATION] <session-id> '<command>'
-ssh-handoff run [--timeout DURATION] <session-id> - < script.sh
+ssh-handoff run [--stream] [--timeout DURATION] <session-id> '<command>'
+ssh-handoff run [--stream] [--timeout DURATION] <session-id> - < script.sh
 ```
 
 `run` 通过已认证 transport 新建 channel，同步执行一条非交互命令。默认超时为一分钟：
@@ -94,6 +94,24 @@ ssh-handoff run A3B4 'sudo -n systemctl restart myapp'
 ```
 
 `sudo -n` 的权限错误会直接返回。`run` 超时只终止本地 SSH 调用，远端进程可能继续运行；超时后先检查远端进程和已有状态，再决定是否重试。
+
+长时间运行的命令可以加 `--stream`，让输出在命令结束前持续返回：
+
+```sh
+ssh-handoff run --stream --timeout 10m A3B4 'docker compose pull'
+```
+
+流式模式使用 NDJSON，每行都是一条完整 JSON 事件。`exec` session 产生 `stdout` 和
+`stderr` 事件，`shell-pty` session 产生 `output` 事件；最后一行只会是一个 `result`
+或 `error` 事件。已经发送的输出不会在 `result` 中重复：
+
+```jsonl
+{"type":"stdout","data":"pulling api\n"}
+{"type":"stderr","data":"warning: retrying\n"}
+{"type":"result","session":"A3B4","mode":"exec","exit_code":0,"timed_out":false}
+```
+
+不加 `--stream` 时保持原有的单个 JSON 结果，适合只关心最终状态的短命令。
 
 ### `list`
 
@@ -146,6 +164,9 @@ PTY（pseudo-terminal，伪终端）让远端程序以连接到终端的方式�
 ### `run`
 
 `run` 的结果结构取决于 session 的执行模式。
+
+以下单个 JSON 结构用于未指定 `--stream` 的默认模式。流式模式的 NDJSON 事件见
+[`run`](#run) 命令说明。
 
 #### `exec`
 
@@ -223,12 +244,12 @@ closed A3B4
 ```text
 请使用本机的 ssh-handoff 操作我已经认证的 SSH session <SESSION_ID>。
 
-- 使用 `ssh-handoff run [--timeout DURATION] <SESSION_ID> '<command>'` 执行普通命令；复杂或多行命令可通过 `ssh-handoff run <SESSION_ID> - < SCRIPT` 从本地标准输入读取。
+- 使用 `ssh-handoff run [--timeout DURATION] <SESSION_ID> '<command>'` 执行普通命令；长时间运行的命令加 `--stream` 实时接收 NDJSON；复杂或多行命令可通过 `ssh-handoff run <SESSION_ID> - < SCRIPT` 从本地标准输入读取。
 - 如果没有给出 session ID，先运行 `ssh-handoff list`，根据 ID、连接命令和备注识别；无法确定时询问我。
 - 命令应包含所需的 `cd`、环境变量和完整参数，并能够非交互执行。
 - 需要提权时使用 `sudo -n`，权限失败时告诉我。
 - `timed_out: true` 时检查远端实际状态，再决定是否重试。
-- `exec` 根据 `stdout`、`stderr`、`exit_code` 和 `timed_out` 判断结果；`shell-pty` 根据 `output` 和 `timed_out` 判断结果。
+- 默认模式根据单个 JSON 结果判断；`--stream` 模式持续处理输出事件，并以最后的 `result` 或 `error` 事件判断完成状态。
 - 任务完成后保持 session 存活。
 ```
 
