@@ -63,7 +63,7 @@ func parsePlinkTarget(command string) (plinkTarget, error) {
 			options = false
 			continue
 		}
-		if strings.HasPrefix(argument, "-") && argument != "-" {
+		if options && strings.HasPrefix(argument, "-") && argument != "-" {
 			switch {
 			case argument == "-4" || argument == "-6":
 				if target.AddressFlag != "" && target.AddressFlag != argument {
@@ -318,7 +318,7 @@ func plinkMasterArgs(session *session, target plinkTarget) []string {
 	return append(arguments, plinkTargetArgs(target, true)...)
 }
 
-func plinkDownstreamArgs(session *session, target plinkTarget) []string {
+func plinkDownstreamArgs(session *session, target plinkTarget, commandFile string) []string {
 	arguments := []string{
 		"-load", plinkProfileName(session.ID, "downstream"),
 		"-ssh",
@@ -334,12 +334,36 @@ func plinkDownstreamArgs(session *session, target plinkTarget) []string {
 		arguments = append(arguments, "-t")
 	} else {
 		arguments = append(arguments, "-T")
+		if commandFile != "" {
+			arguments = append(arguments, "-m", commandFile)
+		}
 	}
 	// A sharing downstream does not authenticate. In particular, do not pass
 	// the master's private key: if the upstream disappears between the
 	// shareexists check and process startup, Plink otherwise falls back to a
 	// fresh SSH connection and might authenticate independently.
 	return append(arguments, plinkTargetArgs(target, false)...)
+}
+
+func writePlinkCommandFile(dir, remoteCommand string) (string, error) {
+	file, err := os.CreateTemp(dir, "command-*.txt")
+	if err != nil {
+		return "", err
+	}
+	path := file.Name()
+	removeOnError := func() {
+		_ = file.Close()
+		_ = os.Remove(path)
+	}
+	if _, err := file.WriteString(remoteCommand); err != nil {
+		removeOnError()
+		return "", err
+	}
+	if err := file.Close(); err != nil {
+		_ = os.Remove(path)
+		return "", err
+	}
+	return path, nil
 }
 
 func plinkShareExistsArgs(session *session, target plinkTarget) []string {
@@ -442,10 +466,15 @@ func executeSession(
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	arguments := plinkDownstreamArgs(session, target)
+	commandFile := ""
 	if session.Mode == modeExec {
-		arguments = append(arguments, remoteCommand)
+		commandFile, err = writePlinkCommandFile(runtimeDirectory(), remoteCommand)
+		if err != nil {
+			return runStatus{}, fmt.Errorf("create Plink command file: %w", err)
+		}
+		defer func() { _ = os.Remove(commandFile) }()
 	}
+	arguments := plinkDownstreamArgs(session, target, commandFile)
 	cmd := plinkCommandContext(ctx, session.Platform.PlinkPath, arguments...)
 	streams := newSerializedOutput(emit)
 	if session.Mode == modeShellPTY {

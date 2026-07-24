@@ -93,6 +93,7 @@ func TestParsePlinkTargetRejectsUnsupportedCommands(t *testing.T) {
 		"ssh user@host.example.com uname -a",
 		"ssh -4 -6 user@host.example.com",
 		"ssh -p 0 user@host.example.com",
+		"ssh -- user@host.example.com -p 2222",
 		"ssh 'user@host.example.com",
 		"plink user@host.example.com",
 	} {
@@ -126,11 +127,13 @@ func TestPlinkArgumentsPreserveExecutionMode(t *testing.T) {
 		}
 	}
 
-	execArguments := plinkDownstreamArgs(session, target)
+	commandFile := `C:\Temp\ssh-handoff-command.txt`
+	execArguments := plinkDownstreamArgs(session, target, commandFile)
 	for _, required := range []string{
 		"ssh-handoff-A3B4-downstream", "-share", "-batch",
 		"-noagent", "-no-trivial-auth", "-T",
 		"-no-sanitise-stdout", "-no-sanitise-stderr",
+		"-m", commandFile,
 	} {
 		if !slices.Contains(execArguments, required) {
 			t.Errorf("exec arguments are missing %q: %#v", required, execArguments)
@@ -145,7 +148,7 @@ func TestPlinkArgumentsPreserveExecutionMode(t *testing.T) {
 	}
 
 	session.Mode = modeShellPTY
-	ptyArguments := plinkDownstreamArgs(session, target)
+	ptyArguments := plinkDownstreamArgs(session, target, "")
 	if !slices.Contains(ptyArguments, "-t") || slices.Contains(ptyArguments, "-T") {
 		t.Fatalf("shell-pty arguments do not select a PTY: %#v", ptyArguments)
 	}
@@ -154,6 +157,23 @@ func TestPlinkArgumentsPreserveExecutionMode(t *testing.T) {
 	if slices.Contains(shareExistsArguments, "-i") ||
 		slices.Contains(shareExistsArguments, target.IdentityFile) {
 		t.Fatalf("share check unexpectedly received authentication material: %#v", shareExistsArguments)
+	}
+}
+
+func TestWritePlinkCommandFilePreservesScript(t *testing.T) {
+	script := "printf '你好\\n'\n" + strings.Repeat("echo payload\n", 4000)
+	path, err := writePlinkCommandFile(t.TempDir(), script)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(path) })
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != script {
+		t.Fatal("Plink command file did not preserve the script")
 	}
 }
 
