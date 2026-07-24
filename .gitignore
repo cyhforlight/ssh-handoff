@@ -1,2 +1,5 @@
 /ssh-handoff
+/ssh-handoff.exe
+/ssh-handoff.exe~
+*.test.exe
 *.cover

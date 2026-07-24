@@ -129,7 +129,7 @@ func runCommand(registry *sessionRegistry, args []string, stdin io.Reader, stdou
 		if err != nil {
 			return writeRunError(output, "local_error", fmt.Errorf("read command from stdin: %w", err))
 		}
-		command = string(data)
+		command = normalizeStdinCommand(data)
 	}
 
 	var status runStatus
@@ -154,6 +154,10 @@ func runCommand(registry *sessionRegistry, args []string, stdin io.Reader, stdou
 		return 1
 	}
 	return 0
+}
+
+func normalizeStdinCommand(data []byte) string {
+	return strings.ReplaceAll(string(data), "\r\n", "\n")
 }
 
 func listCommand(registry *sessionRegistry, args []string, stdout, stderr io.Writer) int {
@@ -248,7 +252,7 @@ func helpText(command string) (string, bool) {
   --mode MODE     执行模式：exec（默认）或 shell-pty
 
 进入空闲 Shell 后按 Ctrl-] 切换托管；再次按下恢复交互。
-`, true
+` + platformOpenHelp(), true
 	case "run":
 		return `通过已有 session 的新 channel 同步执行一条命令。
 
