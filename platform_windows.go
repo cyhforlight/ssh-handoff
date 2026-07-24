@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 	winregistry "golang.org/x/sys/windows/registry"
@@ -28,20 +29,140 @@ func removePlatformSessionFiles(_, id string) {
 
 func runtimeDirectory() string {
 	base, err := os.UserCacheDir()
-	if err != nil || base == "" {
-		base = os.TempDir()
+	if err == nil && base != "" {
+		return filepath.Join(base, "ssh-handoff", "runtime")
 	}
-	return filepath.Join(base, "ssh-handoff", "runtime")
+	if profile, profileErr := windows.GetCurrentProcessToken().GetUserProfileDirectory(); profileErr == nil &&
+		profile != "" {
+		return filepath.Join(profile, ".ssh-handoff", "runtime")
+	}
+	// A machine-wide temporary directory cannot preserve the session's
+	// current-user boundary, so directory setup fails closed instead.
+	return ""
 }
 
 func ensurePrivateDirectory(path string) error {
+	if path == "" {
+		return errors.New("cannot determine a private runtime directory for the current Windows user")
+	}
 	if err := os.MkdirAll(path, 0o700); err != nil {
 		return err
+	}
+	if err := validateWindowsDirectory(path); err != nil {
+		return err
+	}
+	user, err := currentWindowsUser()
+	if err != nil {
+		return fmt.Errorf("query current Windows user: %w", err)
+	}
+	descriptor, err := windows.GetNamedSecurityInfo(
+		path,
+		windows.SE_FILE_OBJECT,
+		windows.OWNER_SECURITY_INFORMATION,
+	)
+	if err != nil {
+		return fmt.Errorf("read runtime directory owner: %w", err)
+	}
+	owner, _, err := descriptor.Owner()
+	if err != nil {
+		return fmt.Errorf("read runtime directory owner: %w", err)
+	}
+	if !windows.EqualSid(owner, user.User.Sid) {
+		return fmt.Errorf("runtime directory is not owned by the current user: %s", path)
+	}
+	acl, err := privateWindowsACL(user.User.Sid)
+	if err != nil {
+		return fmt.Errorf("build private runtime ACL: %w", err)
+	}
+	if err := windows.SetNamedSecurityInfo(
+		path,
+		windows.SE_FILE_OBJECT,
+		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
+		nil,
+		nil,
+		acl,
+		nil,
+	); err != nil {
+		return fmt.Errorf("protect runtime directory ACL: %w", err)
 	}
 	return validatePrivateDirectory(path)
 }
 
 func validatePrivateDirectory(path string) error {
+	if path == "" {
+		return errors.New("cannot determine a private runtime directory for the current Windows user")
+	}
+	if err := validateWindowsDirectory(path); err != nil {
+		return err
+	}
+	user, err := currentWindowsUser()
+	if err != nil {
+		return fmt.Errorf("query current Windows user: %w", err)
+	}
+	descriptor, err := windows.GetNamedSecurityInfo(
+		path,
+		windows.SE_FILE_OBJECT,
+		windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION,
+	)
+	if err != nil {
+		return fmt.Errorf("read runtime directory security: %w", err)
+	}
+	owner, _, err := descriptor.Owner()
+	if err != nil {
+		return fmt.Errorf("read runtime directory owner: %w", err)
+	}
+	if !windows.EqualSid(owner, user.User.Sid) {
+		return fmt.Errorf("runtime directory is not owned by the current user: %s", path)
+	}
+	control, _, err := descriptor.Control()
+	if err != nil {
+		return fmt.Errorf("read runtime directory ACL control: %w", err)
+	}
+	if control&windows.SE_DACL_PROTECTED == 0 {
+		return fmt.Errorf("runtime directory inherits permissions from its parent: %s", path)
+	}
+	dacl, _, err := descriptor.DACL()
+	if err != nil {
+		return fmt.Errorf("read runtime directory ACL: %w", err)
+	}
+	if dacl == nil || dacl.AceCount != 2 {
+		return fmt.Errorf("runtime directory ACL is not private to the current user: %s", path)
+	}
+	// The file-system security provider expands GENERIC_ALL on the directory
+	// itself while preserving it on the inherit-only ACE for children.
+	const fileAllAccess windows.ACCESS_MASK = 0x1f01ff
+	wantInheritedFlags := uint8(
+		windows.OBJECT_INHERIT_ACE |
+			windows.CONTAINER_INHERIT_ACE |
+			windows.INHERIT_ONLY_ACE,
+	)
+	direct, inherited := false, false
+	for index := uint32(0); index < uint32(dacl.AceCount); index++ {
+		var ace *windows.ACCESS_ALLOWED_ACE
+		if err := windows.GetAce(dacl, index, &ace); err != nil {
+			return fmt.Errorf("read runtime directory ACL entry: %w", err)
+		}
+		aceSID := (*windows.SID)(unsafe.Pointer(&ace.SidStart))
+		if ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE ||
+			!windows.EqualSid(aceSID, user.User.Sid) {
+			return fmt.Errorf("runtime directory ACL is not private to the current user: %s", path)
+		}
+		switch {
+		case ace.Header.AceFlags == 0 && ace.Mask == fileAllAccess:
+			direct = true
+		case ace.Header.AceFlags == wantInheritedFlags && ace.Mask == windows.GENERIC_ALL:
+			inherited = true
+		default:
+			return fmt.Errorf("runtime directory ACL is not private to the current user: %s", path)
+		}
+	}
+	if !direct || !inherited {
+		return fmt.Errorf("runtime directory ACL is not private to the current user: %s", path)
+	}
+	return nil
+}
+
+func validateWindowsDirectory(path string) error {
 	info, err := os.Lstat(path)
 	if err != nil {
 		return err
@@ -49,7 +170,33 @@ func validatePrivateDirectory(path string) error {
 	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
 		return fmt.Errorf("runtime path is not a directory: %s", path)
 	}
+	name, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return err
+	}
+	attributes, err := windows.GetFileAttributes(name)
+	if err != nil {
+		return err
+	}
+	if attributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+		return fmt.Errorf("runtime path must not be a reparse point: %s", path)
+	}
 	return nil
+}
+
+func currentWindowsUser() (*windows.Tokenuser, error) {
+	return windows.GetCurrentProcessToken().GetTokenUser()
+}
+
+func privateWindowsACL(user *windows.SID) (*windows.ACL, error) {
+	descriptor, err := windows.SecurityDescriptorFromString(
+		"D:P(A;OICI;GA;;;" + user.String() + ")",
+	)
+	if err != nil {
+		return nil, err
+	}
+	acl, _, err := descriptor.DACL()
+	return acl, err
 }
 
 func withFileLock(path string, action func() error) error {

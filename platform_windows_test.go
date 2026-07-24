@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/sys/windows"
 	winregistry "golang.org/x/sys/windows/registry"
 )
 
@@ -27,6 +28,51 @@ func TestWindowsRuntimeDirectoryAndFileLock(t *testing.T) {
 	}
 	if processAlive(-1) {
 		t.Fatal("negative process ID is reported alive")
+	}
+}
+
+func TestWindowsRuntimeDirectoryFallbackUsesUserProfile(t *testing.T) {
+	t.Setenv("LocalAppData", "")
+	profile, err := windows.GetCurrentProcessToken().GetUserProfileDirectory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(profile, ".ssh-handoff", "runtime")
+	if got := runtimeDirectory(); got != want {
+		t.Fatalf("runtimeDirectory() = %q, want %q", got, want)
+	}
+}
+
+func TestWindowsRuntimeDirectoryRejectsBroadACL(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime")
+	if err := ensurePrivateDirectory(path); err != nil {
+		t.Fatal(err)
+	}
+
+	descriptor, err := windows.SecurityDescriptorFromString("D:P(A;OICI;GA;;;WD)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dacl, _, err := descriptor.DACL()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := windows.SetNamedSecurityInfo(
+		path,
+		windows.SE_FILE_OBJECT,
+		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
+		nil,
+		nil,
+		dacl,
+		nil,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := validatePrivateDirectory(path); err == nil {
+		t.Fatal("validatePrivateDirectory accepted an ACL granting access to Everyone")
+	}
+	if err := ensurePrivateDirectory(path); err != nil {
+		t.Fatalf("ensurePrivateDirectory did not restore the private ACL: %v", err)
 	}
 }
 
