@@ -54,15 +54,14 @@ func parseMode(value string) (executionMode, error) {
 	return mode, nil
 }
 
-func openRegistry() (*sessionRegistry, error) {
-	dir := runtimeDirectory()
-	if err := ensurePrivateDirectory(dir); err != nil {
-		return nil, err
-	}
-	return &sessionRegistry{dir: dir}, nil
+func newSessionRegistry() *sessionRegistry {
+	return &sessionRegistry{dir: runtimeDirectory()}
 }
 
 func (registry *sessionRegistry) create(note string, mode executionMode, command string) (*session, error) {
+	if err := ensurePrivateDirectory(registry.dir); err != nil {
+		return nil, err
+	}
 	var created *session
 	err := withFileLock(filepath.Join(registry.dir, ".registry.lock"), func() error {
 		sessions, err := registry.list()
@@ -138,8 +137,17 @@ func (registry *sessionRegistry) write(session *session) error {
 }
 
 func (registry *sessionRegistry) loadAll() ([]*session, error) {
+	if err := validatePrivateDirectory(registry.dir); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
 	entries, err := os.ReadDir(registry.dir)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	sessions := make([]*session, 0, len(entries))

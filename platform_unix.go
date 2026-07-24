@@ -41,20 +41,39 @@ func ensurePrivateDirectory(path string) error {
 	if err := os.MkdirAll(path, 0o700); err != nil {
 		return err
 	}
-	var stat unix.Stat_t
-	if err := unix.Lstat(path, &stat); err != nil {
+	permissions, err := privateDirectoryPermissions(path)
+	if err != nil {
 		return err
 	}
-	if stat.Mode&unix.S_IFMT != unix.S_IFDIR {
-		return fmt.Errorf("runtime path is not a directory: %s", path)
-	}
-	if stat.Uid != uint32(os.Getuid()) {
-		return fmt.Errorf("runtime directory is not owned by the current user: %s", path)
-	}
-	if stat.Mode&0o777 != 0o700 {
+	if permissions != 0o700 {
 		return os.Chmod(path, 0o700)
 	}
 	return nil
+}
+
+func validatePrivateDirectory(path string) error {
+	permissions, err := privateDirectoryPermissions(path)
+	if err != nil {
+		return err
+	}
+	if permissions != 0o700 {
+		return fmt.Errorf("runtime directory permissions are %o, want 700: %s", permissions, path)
+	}
+	return nil
+}
+
+func privateDirectoryPermissions(path string) (uint32, error) {
+	var stat unix.Stat_t
+	if err := unix.Lstat(path, &stat); err != nil {
+		return 0, err
+	}
+	if stat.Mode&unix.S_IFMT != unix.S_IFDIR {
+		return 0, fmt.Errorf("runtime path is not a directory: %s", path)
+	}
+	if stat.Uid != uint32(os.Getuid()) {
+		return 0, fmt.Errorf("runtime directory is not owned by the current user: %s", path)
+	}
+	return stat.Mode & 0o777, nil
 }
 
 func withFileLock(path string, action func() error) error {

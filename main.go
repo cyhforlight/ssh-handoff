@@ -64,14 +64,7 @@ func runCLI(args []string, stdin *os.File, stdout, stderr io.Writer) int {
 		return writeHelp(args[0], stdout, stderr)
 	}
 
-	registry, err := openRegistry()
-	if err != nil {
-		if args[0] == "run" {
-			return writeJSONError(stdout, "local_error", err)
-		}
-		writeTextf(stderr, "ssh-handoff: %v\n", err)
-		return 2
-	}
+	registry := newSessionRegistry()
 
 	switch args[0] {
 	case "open":

@@ -2,13 +2,35 @@ package main
 
 import (
 	"bytes"
+	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 )
 
+func TestRegistryTreatsMissingDirectoryAsEmpty(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime")
+	registry := &sessionRegistry{dir: path}
+
+	sessions, err := registry.list()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 0 {
+		t.Fatalf("registry.list() returned %d sessions, want none", len(sessions))
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("registry.list() materialized runtime directory: %v", err)
+	}
+	if _, err := registry.resolve("ABCD"); !errors.Is(err, errSessionNotFound) {
+		t.Fatalf("registry.resolve() error = %v, want errSessionNotFound", err)
+	}
+}
+
 func TestRegistryPersistsSessionAndPublishesInfo(t *testing.T) {
-	registry := &sessionRegistry{dir: t.TempDir()}
+	registry := &sessionRegistry{dir: filepath.Join(t.TempDir(), "runtime")}
 	created, err := registry.create("production", modeShellPTY, "ssh jump-alias")
 	if err != nil {
 		t.Fatal(err)
