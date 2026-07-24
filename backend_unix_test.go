@@ -3,8 +3,12 @@
 package main
 
 import (
+	"context"
+	"io"
+	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestInjectSSHPreservesOriginalSuffix(t *testing.T) {
@@ -59,5 +63,50 @@ func TestDownstreamCommandSelectsExecutionMode(t *testing.T) {
 	}
 	if !strings.Contains(ptyCommand, "'-tt'") {
 		t.Fatalf("shell-pty command does not request a PTY: %s", ptyCommand)
+	}
+}
+
+func TestShellCommandContextBoundsInheritedOutput(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	readyRead, readyWrite, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = readyRead.Close()
+	}()
+
+	cmd := shellCommandContext(
+		ctx,
+		`/bin/sh -c 'trap "" HUP; sleep 2 & printf x >&3; wait'`,
+	)
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+	cmd.ExtraFiles = []*os.File{readyWrite}
+
+	if err := cmd.Start(); err != nil {
+		_ = readyWrite.Close()
+		t.Fatal(err)
+	}
+	if err := readyWrite.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	var ready [1]byte
+	if _, err := io.ReadFull(readyRead, ready[:]); err != nil {
+		t.Fatal(err)
+	}
+
+	started := time.Now()
+	cancel()
+	err = cmd.Wait()
+
+	if err == nil {
+		t.Fatal("Wait unexpectedly succeeded after cancellation")
+	}
+	if elapsed := time.Since(started); elapsed >= time.Second {
+		t.Fatalf("Wait took %s; inherited output pipe was not bounded", elapsed)
 	}
 }

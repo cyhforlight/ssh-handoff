@@ -17,6 +17,8 @@ import (
 
 var errInvalidSSHCommand = errors.New("ssh command must start with 'ssh ' and include a destination")
 
+const childIOWaitDelay = 100 * time.Millisecond
+
 func injectSSH(command string, options ...string) (string, error) {
 	if len(command) < 4 || !strings.HasPrefix(command, "ssh") {
 		return "", errInvalidSSHCommand
@@ -43,6 +45,12 @@ func shellQuote(value string) string {
 		return "''"
 	}
 	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
+}
+
+func shellCommandContext(ctx context.Context, command string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", "exec "+command)
+	cmd.WaitDelay = childIOWaitDelay
+	return cmd
 }
 
 func masterCommand(session *session) (string, error) {
@@ -73,7 +81,7 @@ func runControlCommand(session *session, operation string) ([]byte, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	return exec.CommandContext(ctx, "/bin/sh", "-c", "exec "+command).CombinedOutput()
+	return shellCommandContext(ctx, command).CombinedOutput()
 }
 
 func executeSession(session *session, remoteCommand string, timeout time.Duration) (runResult, error) {
@@ -98,7 +106,7 @@ func executeSession(session *session, remoteCommand string, timeout time.Duratio
 	if session.Mode == modeExec {
 		command += " " + shellQuote(remoteCommand)
 	}
-	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", "exec "+command)
+	cmd := shellCommandContext(ctx, command)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	if session.Mode == modeShellPTY {
