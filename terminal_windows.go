@@ -68,9 +68,15 @@ func serveOpenSession(
 		return 2
 	}
 
-	width, height, err := term.GetSize(int(stdin.Fd()))
-	if err != nil {
-		width, height = 80, 24
+	consoleOutput, consoleOutputErr := os.OpenFile("CONOUT$", os.O_RDWR, 0)
+	if consoleOutputErr == nil {
+		defer func() { _ = consoleOutput.Close() }()
+	}
+	width, height := 80, 24
+	if consoleOutputErr == nil {
+		if currentWidth, currentHeight, sizeErr := term.GetSize(int(consoleOutput.Fd())); sizeErr == nil {
+			width, height = currentWidth, currentHeight
+		}
 	}
 	restoreCodePages, err := useUTF8Console()
 	if err != nil {
@@ -190,10 +196,12 @@ func serveOpenSession(
 				return 2
 			}
 		case <-resize.C:
-			width, height, sizeErr := term.GetSize(int(stdin.Fd()))
-			if sizeErr == nil && (width != lastWidth || height != lastHeight) {
-				if err := terminal.Resize(width, height); err == nil {
-					lastWidth, lastHeight = width, height
+			if consoleOutput != nil {
+				width, height, sizeErr := term.GetSize(int(consoleOutput.Fd()))
+				if sizeErr == nil && (width != lastWidth || height != lastHeight) {
+					if err := terminal.Resize(width, height); err == nil {
+						lastWidth, lastHeight = width, height
+					}
 				}
 			}
 		case <-shutdown:
