@@ -2,13 +2,15 @@
 
 用户在终端中建立的 SSH 连接由其中运行的 `ssh` 进程持有，Agent 无法直接使用。Agent 的每次命令调用都会启动独立进程，因此即使用户已经登录，Agent 也没有可复用的远端执行入口。
 
-ssh-handoff 将用户建立的 SSH 连接保存为本地可发现、可复用的 session。Agent 通过 session ID 复用同一条 OpenSSH transport，并为每条命令创建独立 channel；用户继续保留原始 Shell。
+ssh-handoff 将用户建立的 SSH 连接保存为本地可发现、可复用的 session。Agent 通过 session ID 复用同一条已认证 SSH transport，并为每条命令创建独立 channel；用户继续保留原始 Shell。
 
-ssh-handoff 当前支持 Linux、macOS 和 WSL，依赖系统 OpenSSH；尚未支持原生 Windows。
+ssh-handoff 支持 Linux、macOS、WSL 和原生 Windows。Linux、macOS 与 WSL 使用系统 OpenSSH 的 `ControlMaster`；Windows 使用 Plink connection sharing，并通过 ConPTY 保留完整的交互终端。
 
 ## 安装
 
-ssh-handoff 需要 Go 1.26 或更新版本，以及支持 `ControlMaster` 和 `ControlPath` 的系统 OpenSSH 客户端。可以直接安装最新版：
+从源码构建需要 Go 1.26 或更新版本。Linux、macOS 与 WSL 还需要支持 `ControlMaster` 和 `ControlPath` 的系统 OpenSSH 客户端。原生 Windows 需要 Windows 10 1809 或更新版本以及 Plink 0.84 或更新版本；`plink.exe` 可放在 `ssh-handoff.exe` 同目录、同目录的 `bin` 子目录或 `PATH` 中，也可以通过 `SSH_HANDOFF_PLINK` 指定完整路径。
+
+可以直接安装最新版：
 
 ```sh
 go install github.com/cyhforlight/ssh-handoff@latest
@@ -18,6 +20,12 @@ go install github.com/cyhforlight/ssh-handoff@latest
 
 ```sh
 go build -o ssh-handoff .
+```
+
+在 PowerShell 中构建 Windows 可执行文件：
+
+```powershell
+go build -o ssh-handoff.exe .
 ```
 
 ## 快速开始
@@ -56,13 +64,23 @@ ID 输入不区分大小写，`a3b4` 和 `A3B4` 指向同一个 session。
 ssh-handoff open [--note NOTE] [--mode exec|shell-pty] 'ssh ...'
 ```
 
-连接命令必须是以 `ssh` 开头、用于登录的单条命令。ssh-handoff 会插入连接复用参数，其余内容保持不变：
+连接命令必须是以 `ssh` 开头、用于登录的单条命令。在 Linux、macOS 与 WSL 上，ssh-handoff 会插入连接复用参数，其余内容保持不变：
 
 ```sh
 ssh-handoff open 'ssh -p 2222 user@example.com'
 ssh-handoff open --note '生产环境' 'ssh -J bastion user@internal.example.com'
 ssh-handoff open --mode shell-pty 'ssh jump-alias'
 ```
+
+原生 Windows 会把命令转换为等价的 Plink 参数，因此有意要求显式提供用户，并只接受 `-4`、`-6`、`-C`、`-i FILE`、`-l USER` 和 `-p PORT`：
+
+```powershell
+ssh-handoff open 'ssh user@example.com'
+ssh-handoff open --mode shell-pty 'ssh -p 2222 JMS-token@jump.example.com'
+ssh-handoff open 'ssh -i C:\Keys\operator.ppk operator@example.com'
+```
+
+Windows 后端不读取 OpenSSH 的 `~/.ssh/config`，也不转换 `-J`、`-o`、`ProxyCommand` 或 SSH host alias。主机指纹、密码、MFA、Pageant 和密钥认证由 Plink 在原始终端中处理；`-i` 应指向 Plink 可读取的私钥文件。
 
 一个 `open` 进程对应一个 session。关闭该进程或终端会结束 session。
 
@@ -85,7 +103,13 @@ ssh-handoff run --timeout 2m A3B4 'kubectl get nodes -o wide'
 ssh-handoff run A3B4 - < deploy.sh
 ```
 
-标准输入只用于提供命令文本；读取完成后，命令仍作为一次非交互执行发送，不会继续向远端程序转发输入。
+在 PowerShell 中可以使用：
+
+```powershell
+Get-Content -Raw -Encoding utf8 .\deploy.sh | .\ssh-handoff.exe run A3B4 -
+```
+
+标准输入只用于提供命令文本；读取完成后，命令仍作为一次非交互执行发送，不会继续向远端程序转发输入。stdin 文本中的 CRLF 会规范化为 LF，以便 Windows 文本管道和脚本能够交给远端 POSIX Shell；单独的 CR 不会被改写。
 
 需要提权的命令应使用非交互模式：
 
@@ -135,17 +159,17 @@ ssh-handoff close A3B4
 
 ## 工作模型
 
-一个 session 持有一条已经完成认证的底层 SSH 连接（OpenSSH transport），它可以同时承载多个相互独立的 channel：
+一个 session 持有一条已经完成认证的底层 SSH transport，它可以同时承载多个相互独立的 channel：
 
 ```text
-已认证的 OpenSSH transport
+已认证的 SSH transport（OpenSSH ControlMaster / Plink upstream）
 ├── 原始 Shell channel：人工操作、托管切换和定时保活
 └── 命令 channel：每次 run 单独新建
 ```
 
 `run` 的命令和输出不会进入原始终端，托管状态只作用于原始 Shell channel。每次 `run` 都是一次完整、同步、非交互的命令执行，调用方会等待该次结果，同一 session 的多次调用按顺序执行。命令 channel 在调用结束后关闭，不继承原始 Shell 或上一次 `run` 的工作目录、环境变量和历史状态。新 channel 的初始目录、环境和 Shell 初始化由远端 SSH 服务决定；需要共享状态的多个步骤应组合在同一个命令字符串中，并显式包含所需的 `cd` 和环境变量。
 
-session 属于创建它的本地系统用户。Agent 需要以同一用户运行，并能访问相同的 runtime 目录和 OpenSSH control socket；未共享这些路径的容器、WSL 实例或其他隔离环境无法发现该 session。
+session 属于创建它的本地系统用户。Agent 需要以同一用户运行，并能访问相同的 runtime 目录及 OpenSSH control socket 或 PuTTY connection-sharing 命名管道；未共享这些路径的容器、其他 Windows 安全令牌、WSL 实例或隔离环境无法发现该 session。
 
 PTY（pseudo-terminal，伪终端）让远端程序以连接到终端的方式运行，因此输出中可能包含输入回显、Shell prompt 和控制字符。原始 Shell channel 使用 PTY，以保留用户操作终端所需的交互能力。部分堡垒机或设备入口拒绝标准 SSH `exec` 请求，只接受带 PTY 的 Shell channel；`shell-pty` session 用于兼容这类入口。
 

@@ -17,7 +17,8 @@ ssh-handoff 是一个本地 CLI 工具：用户先在真实终端中完成 SSH �
 
 ## 使用方式
 
-用户直接提供自己平时使用的 SSH 命令，不要求目标预先存在于 `~/.ssh/config`：
+用户直接提供自己平时使用的 SSH 命令，不要求目标预先存在于 `~/.ssh/config`。下面三种
+形式都可用于 Unix 后端：
 
 ```sh
 ssh-handoff open 'ssh -p 2222 user@example.com'
@@ -25,9 +26,12 @@ ssh-handoff open --mode shell-pty 'ssh jump-alias'
 ssh-handoff open --note '生产环境' 'ssh -J bastion user@internal.example.com'
 ```
 
-`open` 接受一条以 `ssh` 开头的完整命令字符串。工具只在 `ssh` 后插入连接复用所需的
-参数，其余内容不解析、不改写，再交给本地 Shell 执行。输入应是用于登录的单条 SSH
-命令，不包含预设的远程命令或其他 Shell 组合操作。
+`open` 接受一条以 `ssh` 开头、用于登录的命令字符串，不包含预设的远程命令或其他
+Shell 组合操作。Linux、macOS 与 WSL 后端只在 `ssh` 后插入连接复用参数，其余内容
+不解析、不改写，再交给本地 Shell 执行。原生 Windows 后端需要把 OpenSSH 风格的输入
+转换为 Plink 参数，因此要求显式用户，并只接受 `-4`、`-6`、`-C`、`-i`、`-l` 和
+`-p` 这一组可无歧义映射的参数；它不假装兼容 OpenSSH config、host alias、`-J` 或
+任意 `-o` 选项。
 
 `open` 保持在前台，用户在这个窗口中完成密码、MFA、扫码、主机指纹确认或堡垒机选机。
 工具会提示用户在进入目标 Shell 后准备托管。用户在空闲 prompt 上按 `Ctrl-]` 切换为
@@ -89,7 +93,7 @@ close  按 ID 关闭指定 session
 
 项目保留两种在 `open` 时选定的模式：
 
-- `exec`：复用 OpenSSH transport，新建标准远程命令 channel，适合普通服务器，也是默认
+- `exec`：复用已认证 SSH transport，新建标准远程命令 channel，适合普通服务器，也是默认
   模式；
 - `shell-pty`：复用同一条 transport，新建带 PTY 的 Shell channel，面向拒绝标准
   `exec`、只允许交互式会话的堡垒机或设备。
@@ -104,29 +108,37 @@ Agent 命令。`exec` 可以提供独立的 stdout、stderr 和可靠的远端�
 
 ## 技术方向
 
-项目使用 Go 编写，并直接调用系统 OpenSSH。这样可以沿用用户已有的 SSH 配置、跳板机、
-密码或 MFA、硬件密钥和主机指纹处理，而不在项目内重新实现 SSH 协议与认证。
+项目使用 Go 编写，并调用平台已有的 SSH 客户端，而不在项目内重新实现 SSH 协议与认证。
+Linux、macOS 与 WSL 直接调用系统 OpenSSH，因此可以沿用用户已有的 SSH 配置、跳板机、
+密码或 MFA、硬件密钥和主机指纹处理。原生 Windows 调用 Plink 0.84 或更新版本，沿用
+Plink/PuTTY 的主机指纹、Pageant、密码、MFA 与密钥处理。
 
-Go 代码负责本地 session 生命周期、原始终端托管、定时保活和 Agent 调用。v1 面向
-Linux、macOS 和 WSL。每个 `open` 进程持有自己的 SSH 进程、PTY 和 ControlPath
-socket，不设全局后台服务或持久化运行态。连接复用由 OpenSSH 的
-ControlMaster/ControlPath 提供。
+Go 代码负责本地 session 生命周期、原始终端托管、定时保活和 Agent 调用。每个 `open`
+进程持有自己的 SSH 客户端进程和终端，不设全局后台服务或持久化运行态。在 Unix 侧，
+本地终端为 Unix PTY，连接复用由 OpenSSH 的 ControlMaster/ControlPath 提供；在原生
+Windows 侧，本地终端为 ConPTY，连接复用由 Plink connection sharing 提供。
 
-共享的 CLI 与 session 语义不依赖具体平台，SSH 客户端和终端托管位于明确的平台 seam。
-v1 只实现系统 OpenSSH 与 Unix PTY；未来原生 Windows adapter 固定使用 Plink connection
-sharing 与 ConPTY，而不是 Windows OpenSSH。当前不为未实现的 Windows adapter 增加
-空脚手架。
+共享的 CLI、session registry、托管切换和输出语义不依赖具体平台，SSH 客户端与终端
+托管位于明确的平台 seam。Windows adapter 不是用 Plink 模拟 OpenSSH ControlMaster：
+它使用两个临时 PuTTY profile，把原始连接限制为 sharing upstream、把每次 `run`
+限制为 sharing downstream，并在下游禁用独立认证。这样可以保持 session 的所有权和
+关闭语义，避免共享连接消失后悄悄建立第二条已认证 transport。
 
-具体的 socket 路径、参数解析和结果字段属于实现阶段的设计问题，不在本文中预先规定。
+Windows 上 Plink sharing identity 由用户、逻辑 host 与端口决定，因此同一系统用户
+不能同时由 ssh-handoff 持有两个完全相同的 Plink target；工具会在 `open` 时明确拒绝
+这种冲突。Windows session 使用用户 cache 下的 runtime 目录，临时 PuTTY profile 会在
+session 清理时删除。
 
 ## v1 范围
 
-v1 要完成的是：用户通过任意常规 SSH 命令人工建立连接，工具托管并定期保活原始
-Shell，Agent 随后通过新建的 `exec` 或 `shell-pty` channel 同步执行非交互命令，并能
-列出和关闭多个显式 session。
+当前版本要完成的是：用户通过平台支持的 SSH 登录命令人工建立连接，工具托管并定期
+保活原始 Shell，Agent 随后通过新建的 `exec` 或 `shell-pty` channel 同步执行非交互
+命令，并能在 Linux、macOS、WSL 与原生 Windows 上列出和关闭多个显式 session。
 
-v1 不实现原生 Windows，也不计划加入 MCP 适配、文件传输、第二套 SSH 配置、凭据管理、
-异步任务、自动重连与重放、策略审计平台，以及 Agent 对多轮交互程序的自动化。
+当前范围仍不计划加入 MCP 适配、文件传输、凭据管理、异步任务、自动重连与重放、
+策略审计平台，以及 Agent 对多轮交互程序的自动化。Windows adapter 只正规化历史
+`ssh-manager` 已验证的 Plink 路线，不额外实现 Windows OpenSSH ControlMaster 或完整的
+OpenSSH-to-PuTTY 配置翻译层。
 
 范围判断以旧 `ssh-manager` 为现实基线：它没有提供的能力不会因为“一个完整工具似乎
 应该具备”就自然进入 v1。新能力应由实际使用阻力推动。
