@@ -43,7 +43,11 @@ Agent 从另一个进程调用：
 
 ```sh
 ssh-handoff run <session-id> '<command>'
+ssh-handoff run <session-id> - < script.sh
 ```
+
+命令参数为 `-` 时，工具从本地标准输入读取完整命令文本，再按同样的非交互语义执行；
+标准输入不转发给远端程序。
 
 v1 CLI 只包含四个子命令：
 

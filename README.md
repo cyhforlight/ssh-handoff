@@ -70,6 +70,7 @@ ssh-handoff open --mode shell-pty 'ssh jump-alias'
 
 ```sh
 ssh-handoff run [--timeout DURATION] <session-id> '<command>'
+ssh-handoff run [--timeout DURATION] <session-id> - < script.sh
 ```
 
 `run` 通过已认证 transport 新建 channel，同步执行一条非交互命令。默认超时为一分钟：
@@ -77,6 +78,14 @@ ssh-handoff run [--timeout DURATION] <session-id> '<command>'
 ```sh
 ssh-handoff run --timeout 2m A3B4 'kubectl get nodes -o wide'
 ```
+
+命令参数为 `-` 时，ssh-handoff 从本地标准输入读取完整命令文本，适合执行包含多层引号或多行内容的脚本：
+
+```sh
+ssh-handoff run A3B4 - < deploy.sh
+```
+
+标准输入只用于提供命令文本；读取完成后，命令仍作为一次非交互执行发送，不会继续向远端程序转发输入。
 
 需要提权的命令应使用非交互模式：
 
@@ -214,7 +223,7 @@ closed A3B4
 ```text
 请使用本机的 ssh-handoff 操作我已经认证的 SSH session <SESSION_ID>。
 
-- 使用 `ssh-handoff run [--timeout DURATION] <SESSION_ID> '<command>'` 执行所有远端命令。
+- 使用 `ssh-handoff run [--timeout DURATION] <SESSION_ID> '<command>'` 执行普通命令；复杂或多行命令可通过 `ssh-handoff run <SESSION_ID> - < SCRIPT` 从本地标准输入读取。
 - 如果没有给出 session ID，先运行 `ssh-handoff list`，根据 ID、连接命令和备注识别；无法确定时询问我。
 - 命令应包含所需的 `cd`、环境变量和完整参数，并能够非交互执行。
 - 需要提权时使用 `sudo -n`，权限失败时告诉我。

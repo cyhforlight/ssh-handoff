@@ -16,7 +16,7 @@ const defaultTimeout = time.Minute
 
 const (
 	openUsage  = "ssh-handoff open [--note NOTE] [--mode exec|shell-pty] 'ssh ...'"
-	runUsage   = "ssh-handoff run [--timeout DURATION] <session-id> '<command>'"
+	runUsage   = "ssh-handoff run [--timeout DURATION] <session-id> <command|->"
 	listUsage  = "ssh-handoff list"
 	closeUsage = "ssh-handoff close <session-id>"
 )
@@ -70,7 +70,7 @@ func runCLI(args []string, stdin *os.File, stdout, stderr io.Writer) int {
 	case "open":
 		return openCommand(registry, args[1:], stdin, stdout, stderr)
 	case "run":
-		return runCommand(registry, args[1:], stdout)
+		return runCommand(registry, args[1:], stdin, stdout)
 	case "list":
 		return listCommand(registry, args[1:], stdout, stderr)
 	case "close":
@@ -122,7 +122,7 @@ func openCommand(registry *sessionRegistry, args []string, stdin *os.File, stdou
 	return serveOpenSession(registry, session, stdin, stdout, stderr)
 }
 
-func runCommand(registry *sessionRegistry, args []string, stdout io.Writer) int {
+func runCommand(registry *sessionRegistry, args []string, stdin io.Reader, stdout io.Writer) int {
 	flags := flag.NewFlagSet("run", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	timeout := flags.Duration("timeout", defaultTimeout, "command timeout")
@@ -141,10 +141,19 @@ func runCommand(registry *sessionRegistry, args []string, stdout io.Writer) int 
 		return writeRunSessionError(stdout, err)
 	}
 
+	command := flags.Arg(1)
+	if command == "-" {
+		data, err := io.ReadAll(stdin)
+		if err != nil {
+			return writeJSONError(stdout, "local_error", fmt.Errorf("read command from stdin: %w", err))
+		}
+		command = string(data)
+	}
+
 	var result runResult
 	err = registry.withSessionLock(session.ID, func() error {
 		var runErr error
-		result, runErr = executeSession(session, flags.Arg(1), *timeout)
+		result, runErr = executeSession(session, command, *timeout)
 		return runErr
 	})
 	if err != nil {
@@ -266,6 +275,7 @@ func helpText(command string) (string, bool) {
   --timeout DURATION   超时时间（默认 1m）
 
 session ID 输入不区分大小写。执行模式由 open 时的 --mode 决定。
+命令参数为 - 时，从本地标准输入读取完整命令文本。
 `, true
 	case "list":
 		return `列出仍然存活的 session。
