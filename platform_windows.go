@@ -137,14 +137,7 @@ func waitForProcessExit(pid int, timeout time.Duration) bool {
 	}
 	defer windows.CloseHandle(handle) //nolint:errcheck // read-only liveness probe
 
-	milliseconds := timeout.Milliseconds()
-	if milliseconds < 0 {
-		milliseconds = 0
-	}
-	if milliseconds > int64(^uint32(0)-1) {
-		milliseconds = int64(^uint32(0) - 1)
-	}
-	result, err := windows.WaitForSingleObject(handle, uint32(milliseconds))
+	result, err := windows.WaitForSingleObject(handle, uint32(timeout.Milliseconds()))
 	return err == nil && result == windows.WAIT_OBJECT_0
 }
 

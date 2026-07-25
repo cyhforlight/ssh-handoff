@@ -207,13 +207,7 @@ func createWindowsPTYJob() (windows.Handle, error) {
 }
 
 func terminalDimension(value int) int16 {
-	if value < 1 {
-		return 1
-	}
-	if value > 32767 {
-		return 32767
-	}
-	return int16(value)
+	return int16(min(max(value, 1), 32767))
 }
 
 func (terminal *windowsPTY) PID() int {

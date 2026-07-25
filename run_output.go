@@ -88,11 +88,9 @@ func (output *bufferedOutput) writeError(code string, cause error) error {
 func (output *bufferedOutput) result(status runStatus) runResult {
 	result := runResult{runStatus: status}
 	if status.Mode == modeExec {
-		stdout, stderr := output.stdout.String(), output.stderr.String()
-		result.Stdout, result.Stderr = &stdout, &stderr
+		result.Stdout, result.Stderr = new(output.stdout.String()), new(output.stderr.String())
 	} else {
-		text := output.output.String()
-		result.Output = &text
+		result.Output = new(output.output.String())
 	}
 	return result
 }

@@ -24,11 +24,10 @@ func TestStreamingRunOutput(t *testing.T) {
 		}
 		_, _ = stderr.Write([]byte("warning\n"))
 
-		exitCode := 7
 		if err := output.writeResult(runStatus{
 			Session:  "A3B4",
 			Mode:     modeExec,
-			ExitCode: &exitCode,
+			ExitCode: new(7),
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -47,11 +46,10 @@ func TestStreamingRunOutput(t *testing.T) {
 		if err := output.emit(streamOutput, []byte("prompt\r\n")); err != nil {
 			t.Fatal(err)
 		}
-		exitCode := 0
 		if err := output.writeResult(runStatus{
 			Session:  "C5D6",
 			Mode:     modeShellPTY,
-			ExitCode: &exitCode,
+			ExitCode: new(0),
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -73,11 +71,10 @@ func TestBufferedRunOutputKeepsResultShape(t *testing.T) {
 	if err := output.emit(streamStderr, []byte("warning\n")); err != nil {
 		t.Fatal(err)
 	}
-	exitCode := 0
 	if err := output.writeResult(runStatus{
 		Session:  "A3B4",
 		Mode:     modeExec,
-		ExitCode: &exitCode,
+		ExitCode: new(0),
 	}); err != nil {
 		t.Fatal(err)
 	}
