@@ -20,13 +20,8 @@ func serveOpenSession(registry *sessionRegistry, session *session, stdin *os.Fil
 		writeText(stderr, "ssh-handoff open: stdin must be a terminal\n")
 		return 2
 	}
-	command, err := masterCommand(session)
-	if err != nil {
-		writeTextf(stderr, "ssh-handoff open: %v\n", err)
-		return 2
-	}
 	_ = os.Remove(session.Platform.ControlPath)
-	cmd := exec.Command("/bin/sh", "-c", "exec "+command)
+	cmd := exec.Command("ssh", sshMasterArgs(session)...)
 	terminal, err := pty.Start(cmd)
 	if err != nil {
 		writeTextf(stderr, "ssh-handoff open: %v\n", err)

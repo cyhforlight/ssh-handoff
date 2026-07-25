@@ -30,10 +30,10 @@ go build -o ssh-handoff.exe .
 
 ## 快速开始
 
-在一个真实终端中运行平时使用的 SSH 命令：
+在一个真实终端中提供目标并建立 SSH 连接：
 
 ```sh
-ssh-handoff open 'ssh user@example.com'
+ssh-handoff open --host example.com --user user
 ```
 
 `open` 会先显示生成的 session ID（如 A3B4）。随后像平时一样完成密码、MFA、扫码、主机指纹确认或堡垒机选机等操作，以进入目标服务器。
@@ -61,26 +61,30 @@ ID 输入不区分大小写，`a3b4` 和 `A3B4` 指向同一个 session。
 ### `open`
 
 ```sh
-ssh-handoff open [--note NOTE] [--mode exec|shell-pty] 'ssh ...'
+ssh-handoff open --host HOST --user USER [--port PORT] [--identity FILE] [--mode exec|shell-pty] [--note NOTE]
+ssh-handoff open --profile NAME [--mode exec|shell-pty] [--note NOTE]
 ```
 
-连接命令必须是以 `ssh` 开头、用于登录的单条命令。在 Linux、macOS 与 WSL 上，ssh-handoff 会插入连接复用参数，其余内容保持不变：
+直接连接在所有平台上可用。`--host` 和 `--user` 必填，`--port` 默认为 22；host 可以是域名、IPv4 或 IPv6，ssh-handoff 会原样交给当前平台的 SSH 客户端：
 
 ```sh
-ssh-handoff open 'ssh -p 2222 user@example.com'
-ssh-handoff open --note '生产环境' 'ssh -J bastion user@internal.example.com'
-ssh-handoff open --mode shell-pty 'ssh jump-alias'
+ssh-handoff open --host example.com --user operator
+ssh-handoff open --host 2001:db8::10 --user operator --port 2222
+ssh-handoff open --host internal.example.com --user operator --identity ~/.ssh/id_ed25519
 ```
 
-原生 Windows 会把命令转换为等价的 Plink 参数，因此有意要求显式提供用户，并只接受 `-4`、`-6`、`-C`、`-i FILE`、`-l USER` 和 `-p PORT`：
+Linux、macOS 与 WSL 还支持 OpenSSH profile：
 
-```powershell
-ssh-handoff open 'ssh user@example.com'
-ssh-handoff open --mode shell-pty 'ssh -p 2222 JMS-token@jump.example.com'
-ssh-handoff open 'ssh -i C:\Keys\operator.ppk operator@example.com'
+```sh
+ssh-handoff open --profile myserver
+ssh-handoff open --profile jump-alias --mode shell-pty --note '生产环境'
 ```
 
-Windows 后端不读取 OpenSSH 的 `~/.ssh/config`，也不转换 `-J`、`-o`、`ProxyCommand` 或 SSH host alias。主机指纹、密码、MFA、Pageant 和密钥认证由 Plink 在原始终端中处理；`-i` 应指向 Plink 可读取的私钥文件。
+profile 等价于执行 `ssh myserver`，HostName、User、Port、IdentityFile、ProxyJump 等配置继续由 OpenSSH 从 `~/.ssh/config` 原生读取。profile 与 direct 参数完全互斥。
+
+原生 Windows 使用 Plink，不支持 OpenSSH profile、PuTTY saved session 或 OpenSSH-to-PuTTY 配置转换。Windows 上的 `--identity` 应指向 Plink 能够读取的私钥文件；Unix 上则应使用 OpenSSH 能够读取的格式。主机指纹、密码、MFA、ssh-agent、Pageant 和密钥认证均由底层客户端在原始终端中处理。
+
+`open` 不提供 IPv4/IPv6、compression、任意 `-o` 或 extra args。复杂的 Unix OpenSSH 配置应放入 profile。端口转发和文件传输以后可分别作为 `forward`、`copy` 操作加入，不属于连接建立参数。
 
 一个 `open` 进程对应一个 session。关闭该进程或终端会结束 session。
 
@@ -125,9 +129,7 @@ ssh-handoff run A3B4 'sudo -n systemctl restart myapp'
 ssh-handoff run --stream --timeout 10m A3B4 'docker compose pull'
 ```
 
-流式模式使用 NDJSON，每行都是一条完整 JSON 事件。`exec` session 产生 `stdout` 和
-`stderr` 事件，`shell-pty` session 产生 `output` 事件；最后一行只会是一个 `result`
-或 `error` 事件。已经发送的输出不会在 `result` 中重复：
+流式模式使用 NDJSON，每行都是一条完整 JSON 事件。`exec` session 产生 `stdout` 和 `stderr` 事件，`shell-pty` session 产生 `output` 事件；最后一行只会是一个 `result` 或 `error` 事件。已经发送的输出不会在 `result` 中重复：
 
 ```jsonl
 {"type":"stdout","data":"pulling api\n"}
@@ -143,7 +145,7 @@ ssh-handoff run --stream --timeout 10m A3B4 'docker compose pull'
 ssh-handoff list
 ```
 
-列出仍然存活的 session，包括 ID、连接命令、备注、执行模式和当前状态。
+列出仍然存活的 session，包括 ID、规范化连接信息、备注、执行模式和当前状态。
 
 ### `close`
 
@@ -189,8 +191,7 @@ PTY（pseudo-terminal，伪终端）让远端程序以连接到终端的方式�
 
 `run` 的结果结构取决于 session 的执行模式。
 
-以下单个 JSON 结构用于未指定 `--stream` 的默认模式。流式模式的 NDJSON 事件见
-[`run`](#run) 命令说明。
+以下单个 JSON 结构用于未指定 `--stream` 的默认模式。流式模式的 NDJSON 事件见 [`run`](#run) 命令说明。
 
 #### `exec`
 
@@ -243,8 +244,9 @@ PTY（pseudo-terminal，伪终端）让远端程序以连接到终端的方式�
 `list` 成功时输出表格，例如：
 
 ```text
-ID    STATE        MODE  CONNECTION            NOTE
-A3B4  interactive  exec  ssh user@example.com  生产环境
+ID    STATE        MODE  CONNECTION                   NOTE
+A3B4  interactive  exec  user@example.com:22          生产环境
+B5C6  managed      exec  profile internal-production
 ```
 
 `starting` 表示原始 SSH 进程正在启动；`interactive` 和 `managed` 表示原始 Shell 当前处于人工交互或托管状态。
@@ -269,7 +271,7 @@ closed A3B4
 请使用本机的 ssh-handoff 操作我已经认证的 SSH session <SESSION_ID>。
 
 - 使用 `ssh-handoff run [--timeout DURATION] <SESSION_ID> '<command>'` 执行普通命令；长时间运行的命令加 `--stream` 实时接收 NDJSON；复杂或多行命令可通过 `ssh-handoff run <SESSION_ID> - < SCRIPT` 从本地标准输入读取。
-- 如果没有给出 session ID，先运行 `ssh-handoff list`，根据 ID、连接命令和备注识别；无法确定时询问我。
+- 如果没有给出 session ID，先运行 `ssh-handoff list`，根据 ID、连接信息和备注识别；无法确定时询问我。
 - 命令应包含所需的 `cd`、环境变量和完整参数，并能够非交互执行。
 - 需要提权时使用 `sudo -n`，权限失败时告诉我。
 - `timed_out: true` 时检查远端实际状态，再决定是否重试。

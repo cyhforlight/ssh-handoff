@@ -32,12 +32,7 @@ func serveOpenSession(
 		writeText(stderr, "ssh-handoff open: stdin must be a terminal\n")
 		return 2
 	}
-	target, err := parsePlinkTarget(session.Command)
-	if err != nil {
-		writeTextf(stderr, "ssh-handoff open: %v\n", err)
-		return 2
-	}
-	if err := ensureUniquePlinkTarget(registry, session, target); err != nil {
+	if err := ensureUniquePlinkTarget(registry, session); err != nil {
 		writeTextf(stderr, "ssh-handoff open: %v\n", err)
 		return 2
 	}
@@ -53,7 +48,7 @@ func serveOpenSession(
 	}
 
 	checkContext, cancelCheck := context.WithTimeout(context.Background(), 5*time.Second)
-	exists, _, err := plinkShareExists(checkContext, session, target)
+	exists, _, err := plinkShareExists(checkContext, session)
 	cancelCheck()
 	if err != nil {
 		writeTextf(stderr, "ssh-handoff open: check existing Plink connection: %v\n", err)
@@ -63,7 +58,7 @@ func serveOpenSession(
 		writeTextf(
 			stderr,
 			"ssh-handoff open: a shared Plink connection already exists for %s\n",
-			plinkTargetLabel(target),
+			session.Connection.targetLabel(),
 		)
 		return 2
 	}
@@ -87,7 +82,7 @@ func serveOpenSession(
 
 	terminal, err := startWindowsPTY(
 		session.Platform.PlinkPath,
-		plinkMasterArgs(session, target),
+		plinkMasterArgs(session),
 		width,
 		height,
 	)
@@ -110,7 +105,7 @@ func serveOpenSession(
 		processDone <- windowsProcessResult{exitCode: exitCode, err: waitErr}
 	}()
 
-	if err := waitForPlinkShare(session, target, 2*time.Second); err != nil {
+	if err := waitForPlinkShare(session, 2*time.Second); err != nil {
 		terminal.Terminate()
 		<-processDone
 		writeTextf(stderr, "ssh-handoff open: Plink connection sharing is unavailable: %v\n", err)
@@ -227,7 +222,6 @@ func serveOpenSession(
 func ensureUniquePlinkTarget(
 	registry *sessionRegistry,
 	current *session,
-	target plinkTarget,
 ) error {
 	sessions, err := registry.list()
 	if err != nil {
@@ -237,25 +231,17 @@ func ensureUniquePlinkTarget(
 		if candidate.ID == current.ID {
 			continue
 		}
-		other, err := parsePlinkTarget(candidate.Command)
-		if err != nil {
-			continue
-		}
-		if other.Port == target.Port &&
-			other.User == target.User &&
-			strings.EqualFold(other.Host, target.Host) {
+		if candidate.Connection.Port == current.Connection.Port &&
+			candidate.Connection.User == current.Connection.User &&
+			strings.EqualFold(candidate.Connection.Host, current.Connection.Host) {
 			return fmt.Errorf(
 				"session %s already owns the Plink sharing target %s",
 				candidate.ID,
-				plinkTargetLabel(target),
+				current.Connection.targetLabel(),
 			)
 		}
 	}
 	return nil
-}
-
-func plinkTargetLabel(target plinkTarget) string {
-	return fmt.Sprintf("%s@%s:%d", target.User, target.Host, target.Port)
 }
 
 func useUTF8Console() (func(), error) {

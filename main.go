@@ -14,11 +14,17 @@ import (
 const defaultTimeout = time.Minute
 
 const (
-	openUsage  = "ssh-handoff open [--note NOTE] [--mode exec|shell-pty] 'ssh ...'"
+	openUsage  = "ssh-handoff open --host HOST --user USER [--port PORT] [--identity FILE] [--mode exec|shell-pty] [--note NOTE]\n  ssh-handoff open --profile NAME [--mode exec|shell-pty] [--note NOTE]"
 	runUsage   = "ssh-handoff run [--stream] [--timeout DURATION] <session-id> <command|->"
 	listUsage  = "ssh-handoff list"
 	closeUsage = "ssh-handoff close <session-id>"
 )
+
+type openOptions struct {
+	Connection connectionSpec
+	Note       string
+	Mode       executionMode
+}
 
 type sessionUnavailableError struct {
 	message string
@@ -62,31 +68,13 @@ func runCLI(args []string, stdin *os.File, stdout, stderr io.Writer) int {
 }
 
 func openCommand(registry *sessionRegistry, args []string, stdin *os.File, stdout, stderr io.Writer) int {
-	flags := flag.NewFlagSet("open", flag.ContinueOnError)
-	flags.SetOutput(io.Discard)
-	note := flags.String("note", "", "session note")
-	modeText := flags.String("mode", string(modeExec), "exec or shell-pty")
-	if err := flags.Parse(args); err != nil {
-		writeTextf(stderr, "ssh-handoff open: %v\n", err)
-		return 2
-	}
-	if flags.NArg() != 1 {
-		writeTextf(stderr, "usage: %s\n", openUsage)
-		return 2
-	}
-
-	mode, err := parseMode(*modeText)
+	options, err := parseOpenArguments(args)
 	if err != nil {
 		writeTextf(stderr, "ssh-handoff open: %v\n", err)
 		return 2
 	}
-	command := flags.Arg(0)
-	if err := validateOpenCommand(command); err != nil {
-		writeTextf(stderr, "ssh-handoff open: %v\n", err)
-		return 2
-	}
 
-	session, err := registry.create(*note, mode, command)
+	session, err := registry.create(options.Note, options.Mode, options.Connection)
 	if err != nil {
 		writeTextf(stderr, "ssh-handoff open: %v\n", err)
 		return 2
@@ -100,6 +88,55 @@ func openCommand(registry *sessionRegistry, args []string, stdin *os.File, stdou
 	writeText(stderr, "[ssh-handoff] 登录并进入空闲 Shell 后，按 Ctrl-] 切换托管。\n")
 
 	return serveOpenSession(registry, session, stdin, stdout, stderr)
+}
+
+func parseOpenArguments(args []string) (openOptions, error) {
+	flags := flag.NewFlagSet("open", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	host := flags.String("host", "", "SSH host")
+	user := flags.String("user", "", "SSH user")
+	port := flags.Int("port", 22, "SSH port")
+	identity := flags.String("identity", "", "identity file")
+	profile := flags.String("profile", "", "OpenSSH profile")
+	note := flags.String("note", "", "session note")
+	modeText := flags.String("mode", string(modeExec), "exec or shell-pty")
+	if err := flags.Parse(args); err != nil {
+		return openOptions{}, err
+	}
+	if flags.NArg() != 0 {
+		return openOptions{}, errors.New("usage: " + openUsage)
+	}
+
+	mode, err := parseMode(*modeText)
+	if err != nil {
+		return openOptions{}, err
+	}
+
+	present := make(map[string]bool)
+	flags.Visit(func(flag *flag.Flag) {
+		present[flag.Name] = true
+	})
+	connection := connectionSpec{
+		Host:     *host,
+		User:     *user,
+		Port:     *port,
+		Identity: *identity,
+	}
+	if present["profile"] {
+		if *profile == "" {
+			return openOptions{}, errors.New("profile is required")
+		}
+		for _, name := range []string{"host", "user", "port", "identity"} {
+			if present[name] {
+				return openOptions{}, fmt.Errorf("--profile cannot be combined with --%s", name)
+			}
+		}
+		connection = connectionSpec{Profile: *profile}
+	}
+	if err := connection.validate(); err != nil {
+		return openOptions{}, err
+	}
+	return openOptions{Connection: connection, Note: *note, Mode: mode}, nil
 }
 
 func runCommand(registry *sessionRegistry, args []string, stdin io.Reader, stdout io.Writer) int {
@@ -179,7 +216,7 @@ func listCommand(registry *sessionRegistry, args []string, stdout, stderr io.Wri
 			session.ID,
 			session.State,
 			session.Mode,
-			sanitize.Replace(session.Command),
+			sanitize.Replace(session.Connection.label()),
 			sanitize.Replace(session.Note),
 		)
 	}
@@ -248,8 +285,13 @@ func helpText(command string) (string, bool) {
   ` + openUsage + `
 
 选项:
-  --note NOTE     添加用于辨认 session 的备注
-  --mode MODE     执行模式：exec（默认）或 shell-pty
+  --host HOST       直接连接的主机
+  --user USER       直接连接的用户
+  --port PORT       SSH 端口（默认 22）
+  --identity FILE   本地私钥文件
+  --profile NAME    OpenSSH profile（仅 Unix）
+  --note NOTE       添加用于辨认 session 的备注
+  --mode MODE       执行模式：exec（默认）或 shell-pty
 
 进入空闲 Shell 后按 Ctrl-] 切换托管；再次按下恢复交互。
 ` + platformOpenHelp(), true

@@ -6,69 +6,80 @@ import (
 	"context"
 	"io"
 	"os"
-	"strings"
+	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 )
 
-func TestInjectSSHPreservesOriginalSuffix(t *testing.T) {
-	command := "ssh\t-p 2222 user@example.com  "
-	got, err := injectSSH(command, "-S", "/tmp/control socket", "it's-safe")
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := "ssh '-S' '/tmp/control socket' 'it'\"'\"'s-safe'\t-p 2222 user@example.com  "
-	if got != want {
-		t.Fatalf("injectSSH() = %q, want %q", got, want)
-	}
-}
-
-func TestInjectSSHRejectsInvalidCommand(t *testing.T) {
-	for _, command := range []string{
-		"ssh",
-		"ssh   ",
-		"ssh\nhost",
-		" ssh host",
-		"sshpass host",
-	} {
-		if _, err := injectSSH(command, "-M"); err == nil {
-			t.Errorf("injectSSH(%q) unexpectedly succeeded", command)
+func TestSSHArguments(t *testing.T) {
+	assertArgs := func(name string, got, want []string) {
+		t.Helper()
+		if !slices.Equal(got, want) {
+			t.Fatalf("%s = %#v, want %#v", name, got, want)
 		}
 	}
-}
-
-func TestDownstreamCommandSelectsExecutionMode(t *testing.T) {
 	session := &session{
-		sessionInfo: sessionInfo{Mode: modeExec, Command: "ssh user@example.com"},
-		Platform:    platformSessionState{ControlPath: "/tmp/handoff.sock"},
+		sessionInfo: sessionInfo{
+			Connection: connectionSpec{
+				Host:     "2001:db8::10",
+				User:     "operator",
+				Port:     2222,
+				Identity: "/keys/work key",
+			},
+			Mode: modeExec,
+		},
+		Platform: platformSessionState{ControlPath: "/tmp/control socket"},
 	}
 
-	execCommand, err := downstreamCommand(session)
-	if err != nil {
-		t.Fatal(err)
+	wantMaster := []string{
+		"-M", "-S", "/tmp/control socket", "-tt",
+		"-p", "2222", "-l", "operator", "-i", "/keys/work key",
+		"--", "2001:db8::10",
 	}
-	if strings.Contains(execCommand, "'-tt'") {
-		t.Fatalf("exec command unexpectedly requests a PTY: %s", execCommand)
+	assertArgs("sshMasterArgs()", sshMasterArgs(session), wantMaster)
+
+	wantExec := []string{
+		"-S", "/tmp/control socket",
+		"-o", "ControlMaster=no",
+		"-o", "BatchMode=yes",
+		"-o", "ProxyCommand=false",
+		"-p", "2222", "-l", "operator", "-i", "/keys/work key",
+		"--", "2001:db8::10",
 	}
-	for _, required := range []string{"'/tmp/handoff.sock'", "'ControlMaster=no'", "'BatchMode=yes'", "'ProxyCommand=false'"} {
-		if !strings.Contains(execCommand, required) {
-			t.Errorf("exec command is missing %s: %s", required, execCommand)
-		}
-	}
+	assertArgs("sshDownstreamArgs()", sshDownstreamArgs(session), wantExec)
 
 	session.Mode = modeShellPTY
-	ptyCommand, err := downstreamCommand(session)
-	if err != nil {
-		t.Fatal(err)
+	wantPTY := slices.Insert(slices.Clone(wantExec), 8, "-tt")
+	assertArgs("sshDownstreamArgs()", sshDownstreamArgs(session), wantPTY)
+
+	session.Connection = connectionSpec{Profile: "myserver"}
+	wantProfile := []string{
+		"-S", "/tmp/control socket",
+		"-o", "ControlMaster=no",
+		"-o", "BatchMode=yes",
+		"-o", "ProxyCommand=false",
+		"-tt", "--", "myserver",
 	}
-	if !strings.Contains(ptyCommand, "'-tt'") {
-		t.Fatalf("shell-pty command does not request a PTY: %s", ptyCommand)
+	assertArgs("sshDownstreamArgs()", sshDownstreamArgs(session), wantProfile)
+
+	remoteCommand := `printf '%s\n' "hello world"`
+	command := sshCommandContext(context.Background(), append(sshDownstreamArgs(session), remoteCommand)...)
+	if got := command.Args[len(command.Args)-1]; got != remoteCommand {
+		t.Fatalf("remote command argument = %q, want %q", got, remoteCommand)
 	}
 }
 
-func TestShellCommandContextBoundsInheritedOutput(t *testing.T) {
+func TestSSHCommandContextBoundsInheritedOutput(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	bin := t.TempDir()
+	script := "#!/bin/sh\ntrap '' HUP\nsleep 2 &\nprintf x >&3\nwait\n"
+	if err := os.WriteFile(filepath.Join(bin, "ssh"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
 
 	readyRead, readyWrite, err := os.Pipe()
 	if err != nil {
@@ -78,10 +89,7 @@ func TestShellCommandContextBoundsInheritedOutput(t *testing.T) {
 		_ = readyRead.Close()
 	}()
 
-	cmd := shellCommandContext(
-		ctx,
-		`/bin/sh -c 'trap "" HUP; sleep 2 & printf x >&3; wait'`,
-	)
+	cmd := sshCommandContext(ctx)
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
 	cmd.ExtraFiles = []*os.File{readyWrite}

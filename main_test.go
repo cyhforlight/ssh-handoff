@@ -48,6 +48,56 @@ func TestRunStreamWritesNDJSONError(t *testing.T) {
 	}
 }
 
+func TestParseOpenArguments(t *testing.T) {
+	check := func(arguments []string, want openOptions) {
+		t.Helper()
+		got, err := parseOpenArguments(arguments)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Fatalf("parseOpenArguments() = %#v, want %#v", got, want)
+		}
+	}
+	check([]string{
+		"--host", "2001:db8::10", "--user", "operator",
+		"--identity", "/keys/work key", "--mode", "shell-pty",
+		"--note", "production",
+	}, openOptions{
+		Connection: connectionSpec{
+			Host:     "2001:db8::10",
+			User:     "operator",
+			Port:     22,
+			Identity: "/keys/work key",
+		},
+		Note: "production",
+		Mode: modeShellPTY,
+	})
+	check([]string{"--profile", "myserver"}, openOptions{
+		Connection: connectionSpec{Profile: "myserver"},
+		Mode:       modeExec,
+	})
+}
+
+func TestParseOpenArgumentsRejectsInvalidConnections(t *testing.T) {
+	for _, arguments := range [][]string{
+		{"--host", "example.com"},
+		{"--user", "operator"},
+		{"--host", "example.com", "--user", "operator", "--port", "0"},
+		{"--host", "example.com", "--user", "operator", "--port", "65536"},
+		{"--profile", "myserver", "--host", "example.com"},
+		{"--profile", "myserver", "--port", "22"},
+		{"--profile", "myserver", "--identity", ""},
+		{"--profile", ""},
+		{"--host", "-oProxyCommand=proxy", "--user", "operator"},
+		{"ssh", "operator@example.com"},
+	} {
+		if _, err := parseOpenArguments(arguments); err == nil {
+			t.Errorf("parseOpenArguments(%q) unexpectedly succeeded", arguments)
+		}
+	}
+}
+
 func TestNormalizeStdinCommandUsesPOSIXLineEndings(t *testing.T) {
 	input := []byte("first\r\nsecond\nthird\rfourth\r\n")
 	want := "first\nsecond\nthird\rfourth\n"

@@ -5,147 +5,70 @@ package main
 import (
 	"os"
 	"path/filepath"
-	"reflect"
 	"slices"
 	"strings"
 	"testing"
 )
 
-func TestParsePlinkTarget(t *testing.T) {
-	tests := []struct {
-		name    string
-		command string
-		want    plinkTarget
-	}{
-		{
-			name:    "destination and trailing port",
-			command: "ssh JMS-token@jump.example.com -p 2222",
-			want: plinkTarget{
-				Host: "jump.example.com",
-				User: "JMS-token",
-				Port: 2222,
-			},
-		},
-		{
-			name:    "separate user and quoted identity",
-			command: `ssh -6 -C -l operator -i "C:\Keys\work key.ppk" server.example.com`,
-			want: plinkTarget{
-				Host:         "server.example.com",
-				User:         "operator",
-				Port:         22,
-				AddressFlag:  "-6",
-				Compression:  true,
-				IdentityFile: `C:\Keys\work key.ppk`,
-			},
-		},
-		{
-			name:    "attached options and IPv6",
-			command: `ssh -p2200 -lroot root@[2001:db8::10]`,
-			want: plinkTarget{
-				Host: "2001:db8::10",
-				User: "root",
-				Port: 2200,
-			},
-		},
-		{
-			name:    "UNC identity path",
-			command: `ssh -i "\\fileserver\keys\work key.ppk" operator@example.com`,
-			want: plinkTarget{
-				Host:         "example.com",
-				User:         "operator",
-				Port:         22,
-				IdentityFile: `\\fileserver\keys\work key.ppk`,
-			},
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			got, err := parsePlinkTarget(test.command)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !reflect.DeepEqual(got, test.want) {
-				t.Fatalf("parsePlinkTarget() = %#v, want %#v", got, test.want)
-			}
-		})
-	}
-}
-
-func TestParsePlinkTargetRejectsUnsupportedCommands(t *testing.T) {
-	for _, command := range []string{
-		"ssh host.example.com",
-		"ssh -J bastion user@host.example.com",
-		"ssh -o ProxyCommand=proxy user@host.example.com",
-		"ssh -l first second@host.example.com",
-		"ssh user@host.example.com uname -a",
-		"ssh -4 -6 user@host.example.com",
-		"ssh -p 0 user@host.example.com",
-		"ssh -- user@host.example.com -p 2222",
-		"ssh 'user@host.example.com",
-		"plink user@host.example.com",
-	} {
-		if _, err := parsePlinkTarget(command); err == nil {
-			t.Errorf("parsePlinkTarget(%q) unexpectedly succeeded", command)
-		}
+func TestWindowsRejectsOpenSSHProfile(t *testing.T) {
+	registry := &sessionRegistry{dir: filepath.Join(t.TempDir(), "runtime")}
+	_, err := registry.create("", modeExec, connectionSpec{Profile: "myserver"})
+	if err == nil || !strings.Contains(err.Error(), "does not support OpenSSH profiles") {
+		t.Fatalf("registry.create() error = %v", err)
 	}
 }
 
 func TestPlinkArgumentsPreserveExecutionMode(t *testing.T) {
-	target := plinkTarget{
-		Host:         "jump.example.com",
-		User:         "JMS-token",
-		Port:         2222,
-		AddressFlag:  "-4",
-		Compression:  true,
-		IdentityFile: `C:\Keys\operator.ppk`,
+	assertArgs := func(name string, got, want []string) {
+		t.Helper()
+		if !slices.Equal(got, want) {
+			t.Fatalf("%s = %#v, want %#v", name, got, want)
+		}
 	}
 	session := &session{
-		sessionInfo: sessionInfo{ID: "A3B4", Mode: modeExec},
+		sessionInfo: sessionInfo{
+			ID: "A3B4",
+			Connection: connectionSpec{
+				Host:     "2001:db8::10",
+				User:     "JMS-token",
+				Port:     2222,
+				Identity: `C:\Keys\operator.ppk`,
+			},
+			Mode: modeExec,
+		},
 	}
 
-	master := plinkMasterArgs(session, target)
-	for _, required := range []string{
-		"-load", "ssh-handoff-A3B4-upstream", "-share", "-t",
-		"-P", "2222", "-l", "JMS-token", "-4", "-C",
-		`C:\Keys\operator.ppk`, "jump.example.com",
-	} {
-		if !slices.Contains(master, required) {
-			t.Errorf("master arguments are missing %q: %#v", required, master)
-		}
+	wantMaster := []string{
+		"-load", "ssh-handoff-A3B4-upstream", "-ssh", "-share", "-t",
+		"-P", "2222", "-l", "JMS-token", "-i", `C:\Keys\operator.ppk`,
+		"2001:db8::10",
 	}
+	assertArgs("plinkMasterArgs()", plinkMasterArgs(session), wantMaster)
 
 	commandFile := `C:\Temp\ssh-handoff-command.txt`
-	execArguments := plinkDownstreamArgs(session, target, commandFile)
-	for _, required := range []string{
-		"ssh-handoff-A3B4-downstream", "-share", "-batch",
-		"-noagent", "-no-trivial-auth", "-T",
+	wantExec := []string{
+		"-load", "ssh-handoff-A3B4-downstream", "-ssh", "-share", "-batch",
+		"-no-antispoof", "-noagent", "-no-trivial-auth",
 		"-no-sanitise-stdout", "-no-sanitise-stderr",
-		"-m", commandFile,
-	} {
-		if !slices.Contains(execArguments, required) {
-			t.Errorf("exec arguments are missing %q: %#v", required, execArguments)
-		}
+		"-T", "-m", commandFile,
+		"-P", "2222", "-l", "JMS-token", "2001:db8::10",
 	}
-	if slices.Contains(execArguments, "-t") {
-		t.Fatalf("exec arguments unexpectedly request a PTY: %#v", execArguments)
-	}
-	if slices.Contains(execArguments, "-i") ||
-		slices.Contains(execArguments, target.IdentityFile) {
-		t.Fatalf("sharing downstream unexpectedly received authentication material: %#v", execArguments)
-	}
+	assertArgs("plinkDownstreamArgs()", plinkDownstreamArgs(session, commandFile), wantExec)
 
 	session.Mode = modeShellPTY
-	ptyArguments := plinkDownstreamArgs(session, target, "")
-	if !slices.Contains(ptyArguments, "-t") || slices.Contains(ptyArguments, "-T") {
-		t.Fatalf("shell-pty arguments do not select a PTY: %#v", ptyArguments)
+	wantPTY := []string{
+		"-load", "ssh-handoff-A3B4-downstream", "-ssh", "-share", "-batch",
+		"-no-antispoof", "-noagent", "-no-trivial-auth",
+		"-no-sanitise-stdout", "-no-sanitise-stderr",
+		"-t", "-P", "2222", "-l", "JMS-token", "2001:db8::10",
 	}
+	assertArgs("plinkDownstreamArgs()", plinkDownstreamArgs(session, ""), wantPTY)
 
-	shareExistsArguments := plinkShareExistsArgs(session, target)
-	if slices.Contains(shareExistsArguments, "-i") ||
-		slices.Contains(shareExistsArguments, target.IdentityFile) {
-		t.Fatalf("share check unexpectedly received authentication material: %#v", shareExistsArguments)
+	wantShareExists := []string{
+		"-load", "ssh-handoff-A3B4-downstream", "-ssh", "-shareexists",
+		"-P", "2222", "-l", "JMS-token", "2001:db8::10",
 	}
+	assertArgs("plinkShareExistsArgs()", plinkShareExistsArgs(session), wantShareExists)
 }
 
 func TestWritePlinkCommandFilePreservesScript(t *testing.T) {
@@ -176,33 +99,30 @@ func TestResolveConfiguredPlinkPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want, err := filepath.Abs(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != want {
-		t.Fatalf("resolvePlinkPath() = %q, want %q", got, want)
+	if got != path {
+		t.Fatalf("resolvePlinkPath() = %q, want %q", got, path)
 	}
 }
 
 func TestUniquePlinkTargetRejectsAnotherOwner(t *testing.T) {
 	registry := &sessionRegistry{dir: filepath.Join(t.TempDir(), "runtime")}
-	first, err := registry.create("", modeExec, "ssh operator@Jump.Example.com -p 2222")
-	if err != nil {
-		t.Fatal(err)
+	create := func(host string) *session {
+		t.Helper()
+		session, err := registry.create("", modeExec, connectionSpec{
+			Host: host,
+			User: "operator",
+			Port: 2222,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { registry.remove(session.ID) })
+		return session
 	}
-	defer registry.remove(first.ID)
-	second, err := registry.create("", modeExec, "ssh operator@jump.example.com -p 2222")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer registry.remove(second.ID)
+	first := create("Jump.Example.com")
+	second := create("jump.example.com")
 
-	target, err := parsePlinkTarget(second.Command)
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = ensureUniquePlinkTarget(registry, second, target)
+	err := ensureUniquePlinkTarget(registry, second)
 	if err == nil || !strings.Contains(err.Error(), first.ID) {
 		t.Fatalf("ensureUniquePlinkTarget() error = %v, want conflict with %s", err, first.ID)
 	}

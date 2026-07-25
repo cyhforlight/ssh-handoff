@@ -27,11 +27,11 @@ const (
 )
 
 type sessionInfo struct {
-	ID      string        `json:"id"`
-	Command string        `json:"connection_command"`
-	Note    string        `json:"note,omitempty"`
-	Mode    executionMode `json:"mode"`
-	State   sessionState  `json:"state"`
+	ID         string         `json:"id"`
+	Connection connectionSpec `json:"connection"`
+	Note       string         `json:"note,omitempty"`
+	Mode       executionMode  `json:"mode"`
+	State      sessionState   `json:"state"`
 }
 
 type session struct {
@@ -58,7 +58,17 @@ func newSessionRegistry() *sessionRegistry {
 	return &sessionRegistry{dir: runtimeDirectory()}
 }
 
-func (registry *sessionRegistry) create(note string, mode executionMode, command string) (*session, error) {
+func (registry *sessionRegistry) create(
+	note string,
+	mode executionMode,
+	connection connectionSpec,
+) (*session, error) {
+	if err := connection.validate(); err != nil {
+		return nil, err
+	}
+	if err := validatePlatformConnection(connection); err != nil {
+		return nil, err
+	}
 	if err := ensurePrivateDirectory(registry.dir); err != nil {
 		return nil, err
 	}
@@ -72,11 +82,11 @@ func (registry *sessionRegistry) create(note string, mode executionMode, command
 		id := newSessionID(sessions)
 		created = &session{
 			sessionInfo: sessionInfo{
-				ID:      id,
-				Command: command,
-				Note:    note,
-				Mode:    mode,
-				State:   stateStarting,
+				ID:         id,
+				Connection: connection,
+				Note:       note,
+				Mode:       mode,
+				State:      stateStarting,
 			},
 			Platform: newPlatformSessionState(registry.dir, id),
 			PID:      os.Getpid(),
@@ -161,6 +171,12 @@ func (registry *sessionRegistry) loadAll() ([]*session, error) {
 		}
 		var session session
 		if err := json.Unmarshal(data, &session); err != nil {
+			return nil, fmt.Errorf("read session %s: %w", entry.Name(), err)
+		}
+		if err := session.Connection.validate(); err != nil {
+			return nil, fmt.Errorf("read session %s: invalid connection: %w", entry.Name(), err)
+		}
+		if err := validatePlatformConnection(session.Connection); err != nil {
 			return nil, fmt.Errorf("read session %s: %w", entry.Name(), err)
 		}
 		sessions = append(sessions, &session)

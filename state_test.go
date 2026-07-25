@@ -5,7 +5,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 )
@@ -31,7 +30,13 @@ func TestRegistryTreatsMissingDirectoryAsEmpty(t *testing.T) {
 
 func TestRegistryPersistsSessionAndPublishesInfo(t *testing.T) {
 	registry := &sessionRegistry{dir: filepath.Join(t.TempDir(), "runtime")}
-	created, err := registry.create("production", modeShellPTY, "ssh jump-alias")
+	connection := connectionSpec{
+		Host:     "2001:db8::10",
+		User:     "operator",
+		Port:     2222,
+		Identity: "/keys/production",
+	}
+	created, err := registry.create("production", modeShellPTY, connection)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,8 +52,16 @@ func TestRegistryPersistsSessionAndPublishesInfo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(loaded, created) {
+	if *loaded != *created {
 		t.Fatalf("persisted session is incomplete: %#v", loaded)
+	}
+	data, err := os.ReadFile(registry.statePath(created.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "connection_command") ||
+		!strings.Contains(string(data), `"connection"`) {
+		t.Fatalf("session JSON uses the wrong connection shape: %s", data)
 	}
 
 	var stdout, stderr bytes.Buffer
@@ -63,11 +76,25 @@ func TestRegistryPersistsSessionAndPublishesInfo(t *testing.T) {
 		created.ID,
 		string(created.State),
 		string(created.Mode),
-		created.Command,
+		"operator@[2001:db8::10]:2222 identity=/keys/production",
 		created.Note,
 	} {
 		if !strings.Contains(outputText, field) {
 			t.Errorf("list output is missing %q: %s", field, outputText)
 		}
+	}
+}
+
+func TestRegistryRejectsLegacyCommandSession(t *testing.T) {
+	registry := &sessionRegistry{dir: filepath.Join(t.TempDir(), "runtime")}
+	if err := ensurePrivateDirectory(registry.dir); err != nil {
+		t.Fatal(err)
+	}
+	data := []byte(`{"id":"ABCD","connection_command":"ssh operator@example.com","mode":"exec","state":"interactive","pid":1}`)
+	if err := os.WriteFile(registry.statePath("ABCD"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.loadAll(); err == nil || !strings.Contains(err.Error(), "invalid connection") {
+		t.Fatalf("registry.loadAll() error = %v, want invalid connection", err)
 	}
 }
