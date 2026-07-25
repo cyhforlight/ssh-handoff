@@ -210,12 +210,11 @@ func listCommand(registry *sessionRegistry, args []string, stdout, stderr io.Wri
 	}
 
 	writer := tabwriter.NewWriter(stdout, 0, 4, 2, ' ', 0)
-	writeText(writer, "ID\tSTATE\tMODE\tCONNECTION\tNOTE\n")
+	writeText(writer, "ID\tMODE\tCONNECTION\tNOTE\n")
 	sanitize := strings.NewReplacer("\t", " ", "\r", " ", "\n", " ")
 	for _, session := range sessions {
-		writeTextf(writer, "%s\t%s\t%s\t%s\t%s\n",
+		writeTextf(writer, "%s\t%s\t%s\t%s\n",
 			session.ID,
-			session.State,
 			session.Mode,
 			sanitize.Replace(session.Connection.label()),
 			sanitize.Replace(session.Note),

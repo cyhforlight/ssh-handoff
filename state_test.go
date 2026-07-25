@@ -43,10 +43,6 @@ func TestRegistryPersistsSessionAndPublishesInfo(t *testing.T) {
 	if len(created.ID) != 4 {
 		t.Fatalf("session ID length = %d, want 4: %s", len(created.ID), created.ID)
 	}
-	created.State = stateManaged
-	if err := registry.update(created); err != nil {
-		t.Fatal(err)
-	}
 
 	loaded, err := registry.resolve(strings.ToLower(created.ID))
 	if err != nil {
@@ -74,7 +70,6 @@ func TestRegistryPersistsSessionAndPublishesInfo(t *testing.T) {
 	outputText := stdout.String()
 	for _, field := range []string{
 		created.ID,
-		string(created.State),
 		string(created.Mode),
 		"operator@[2001:db8::10]:2222 identity=/keys/production",
 		created.Note,

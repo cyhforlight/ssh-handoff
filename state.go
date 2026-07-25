@@ -18,20 +18,11 @@ const (
 	modeShellPTY executionMode = "shell-pty"
 )
 
-type sessionState string
-
-const (
-	stateStarting    sessionState = "starting"
-	stateInteractive sessionState = "interactive"
-	stateManaged     sessionState = "managed"
-)
-
 type session struct {
 	ID         string               `json:"id"`
 	Connection connectionSpec       `json:"connection"`
 	Note       string               `json:"note,omitempty"`
 	Mode       executionMode        `json:"mode"`
-	State      sessionState         `json:"state"`
 	Platform   platformSessionState `json:"platform"`
 	PID        int                  `json:"pid"`
 }
@@ -81,7 +72,6 @@ func (registry *sessionRegistry) create(
 			Connection: connection,
 			Note:       note,
 			Mode:       mode,
-			State:      stateStarting,
 			Platform:   newPlatformSessionState(registry.dir, id),
 			PID:        os.Getpid(),
 		}

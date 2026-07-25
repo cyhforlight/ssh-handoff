@@ -15,7 +15,7 @@ import (
 	"golang.org/x/term"
 )
 
-func serveOpenSession(registry *sessionRegistry, session *session, stdin *os.File, stdout, stderr io.Writer) int {
+func serveOpenSession(_ *sessionRegistry, session *session, stdin *os.File, stdout, stderr io.Writer) int {
 	if !term.IsTerminal(int(stdin.Fd())) {
 		writeText(stderr, "ssh-handoff open: stdin must be a terminal\n")
 		return 2
@@ -28,12 +28,6 @@ func serveOpenSession(registry *sessionRegistry, session *session, stdin *os.Fil
 		return 2
 	}
 	defer func() { _ = terminal.Close() }()
-	session.State = stateInteractive
-	if err := registry.update(session); err != nil {
-		terminateProcess(cmd.Process)
-		writeTextf(stderr, "ssh-handoff open: %v\n", err)
-		return 2
-	}
 
 	previousState, err := term.MakeRaw(int(stdin.Fd()))
 	if err != nil {
@@ -94,20 +88,13 @@ func serveOpenSession(registry *sessionRegistry, session *session, stdin *os.Fil
 				keepalive.Stop()
 			}
 			if controller.managed {
-				session.State = stateManaged
 				keepalive = time.NewTicker(keepaliveInterval)
 				keepaliveTick = keepalive.C
 				writeTextf(stderr, "\r\n[ssh-handoff] %s 已托管；按 Ctrl-] 恢复交互。\r\n", session.ID)
 			} else {
-				session.State = stateInteractive
 				keepalive = nil
 				keepaliveTick = nil
 				writeTextf(stderr, "\r\n[ssh-handoff] %s 已恢复交互；按 Ctrl-] 再次托管。\r\n", session.ID)
-			}
-			if err := registry.update(session); err != nil {
-				terminateProcess(cmd.Process)
-				writeTextf(stderr, "\r\nssh-handoff: %v\r\n", err)
-				return 2
 			}
 		case <-keepaliveTick:
 			if err := controller.keepalive(); err != nil {

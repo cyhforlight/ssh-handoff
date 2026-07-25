@@ -145,7 +145,7 @@ ssh-handoff run --stream --timeout 10m A3B4 'docker compose pull'
 ssh-handoff list
 ```
 
-列出仍然存活的 session，包括 ID、规范化连接信息、备注、执行模式和当前状态。
+列出仍然存活的 session，包括 ID、规范化连接信息、备注和执行模式。
 
 ### `close`
 
@@ -244,12 +244,10 @@ PTY（pseudo-terminal，伪终端）让远端程序以连接到终端的方式�
 `list` 成功时输出表格，例如：
 
 ```text
-ID    STATE        MODE  CONNECTION                   NOTE
-A3B4  interactive  exec  user@example.com:22          生产环境
-B5C6  managed      exec  profile internal-production
+ID    MODE  CONNECTION                   NOTE
+A3B4  exec  user@example.com:22          生产环境
+B5C6  exec  profile internal-production
 ```
-
-`starting` 表示原始 SSH 进程正在启动；`interactive` 和 `managed` 表示原始 Shell 当前处于人工交互或托管状态。
 
 `list` 失败时将错误写入 stderr，并以非零状态退出。
 
