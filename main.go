@@ -170,12 +170,7 @@ func runCommand(registry *sessionRegistry, args []string, stdin io.Reader, stdou
 		command = normalizeStdinCommand(data)
 	}
 
-	var status runStatus
-	err = registry.withSessionLock(session.ID, func() error {
-		var runErr error
-		status, runErr = executeSession(session, command, *timeout, output.emit)
-		return runErr
-	})
+	status, err := executeSession(session, command, *timeout, output.emit)
 	if err != nil {
 		return writeRunExecutionError(output, err)
 	}
@@ -234,10 +229,7 @@ func closeCommand(registry *sessionRegistry, args []string, stdout, stderr io.Wr
 		writeTextf(stderr, "ssh-handoff close: %v\n", err)
 		return 2
 	}
-	err = registry.withSessionLock(session.ID, func() error {
-		return closeSession(session)
-	})
-	if err != nil {
+	if err := closeSession(session); err != nil {
 		writeTextf(stderr, "ssh-handoff close: %v\n", err)
 		return 2
 	}
@@ -317,12 +309,12 @@ session ID 输入不区分大小写。执行模式由 open 时的 --mode 决定�
 结果以表格输出。
 `, true
 	case "close":
-		return `关闭指定 session。
+		return `关闭指定 session 及其 SSH transport。
 
 用法:
   ` + closeUsage + `
 
-session ID 输入不区分大小写。
+session ID 输入不区分大小写；该 session 中正在执行的 run 可能随之中断。
 `, true
 	default:
 		return "", false

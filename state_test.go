@@ -111,34 +111,3 @@ func TestRegistrySkipsUnusableSessionFiles(t *testing.T) {
 		t.Fatalf("registry.list() = %#v, want only session %s", sessions, created.ID)
 	}
 }
-
-func TestRegistryCleanupPreservesSessionLock(t *testing.T) {
-	registry := &sessionRegistry{dir: filepath.Join(t.TempDir(), "runtime")}
-	if err := ensurePrivateDirectory(registry.dir); err != nil {
-		t.Fatal(err)
-	}
-	session := &session{
-		ID:         "ABCD",
-		Connection: connectionSpec{Host: "example.com", User: "operator", Port: 22},
-		Mode:       modeExec,
-		PID:        -1,
-	}
-	if err := registry.write(session); err != nil {
-		t.Fatal(err)
-	}
-	lockPath := filepath.Join(registry.dir, session.ID+".lock")
-	if err := os.WriteFile(lockPath, nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	sessions, err := registry.list()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(sessions) != 0 {
-		t.Fatalf("registry.list() returned dead session: %#v", sessions)
-	}
-	if _, err := os.Stat(lockPath); err != nil {
-		t.Fatalf("registry cleanup removed stable session lock: %v", err)
-	}
-}

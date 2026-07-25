@@ -1,6 +1,6 @@
 # ssh-handoff 项目概览
 
-本文用于在设计或编写代码前建立对项目的整体认识。它记录当前阶段的目标、核心语义和范围，不是实现规格。
+本文描述项目的目标、核心语义和范围，用于建立设计与实现所需的整体认识。
 
 ## 项目是什么
 
@@ -51,7 +51,7 @@ close  按 ID 关闭指定 session
 
 托管状态不限制 `run`：人工操作和 Agent 命令位于不同 channel，未托管时 Agent 仍可正常执行命令。托管只控制原始 Shell 的用户输入和定时保活，不改变 `run` 的结果，也不为未托管调用增加警告。
 
-一个 `open` 进程对应一个 session；关闭窗口或进程即结束该 session。`list` 和 `close` 用于发现及显式关闭已有 session。`run` 默认使用单个结构化 JSON 封装命令结果；可选的 `--stream` 使用 NDJSON 在执行期间发送带来源的输出事件，并以唯一的结果或错误事件结束。流式终态不重复已经发送的输出。`list` 以表格展示 session，`close` 返回一行确认文本。
+一个 `open` 进程对应一个 session；关闭窗口、`open` 进程或底层 transport 即结束该 session。`list` 用于发现已有 session，`close` 用于关闭指定 session 及其 transport，并可能中断其中正在执行的 `run`。`run` 默认使用单个结构化 JSON 封装命令结果；可选的 `--stream` 使用 NDJSON 在执行期间发送带来源的输出事件，并以唯一的结果或错误事件结束。流式终态不重复已经发送的输出。`list` 以表格展示 session，`close` 返回一行确认文本。
 
 ## Session 模型
 
@@ -64,12 +64,12 @@ close  按 ID 关闭指定 session
 
 ## 执行模式
 
-项目保留两种在 `open` 时选定的模式：
+项目提供两种在 `open` 时选定的模式：
 
 - `exec`：复用已认证 SSH transport，新建标准远程命令 channel，适合普通服务器，也是默认模式；
 - `shell-pty`：复用同一条 transport，新建带 PTY 的 Shell channel，面向拒绝标准 `exec`、只允许交互式会话的堡垒机或设备。
 
-两种模式都逐次新建 channel，因此 `run` 之间不保留隐式 Shell 状态，但可获得的输出语义不同。Agent 面向行式、非交互的 Linux/POSIX Shell 命令；密码询问、确认菜单、全屏程序和交互式 `sudo` 仍由用户处理。命令同步执行，同一个 session 内一次只运行一条 Agent 命令。`exec` 可以提供独立的 stdout、stderr 和可靠的远端退出状态；`shell-pty` 沿用简单的临时 Shell 语义：写入工作命令和 `exit`，等待 SSH 子进程结束，返回混合输出、本地 SSH 进程退出码和超时状态，不包装命令或使用完成标记，也不承诺该退出码等于工作命令的真实远端退出码。
+两种模式都逐次新建 channel，因此 `run` 之间不保留隐式 Shell 状态，但可获得的输出语义不同。Agent 面向行式、非交互的 Linux/POSIX Shell 命令；密码询问、确认菜单、全屏程序和交互式 `sudo` 仍由用户处理。单次命令同步执行，各次 `run` 通过独立 channel 彼此隔离，可以在同一 session 上并发；有先后依赖的操作应顺序发起。`exec` 可以提供独立的 stdout、stderr 和可靠的远端退出状态；`shell-pty` 采用简单的临时 Shell 语义：写入工作命令和 `exit`，等待 SSH 子进程结束，返回混合输出、本地 SSH 进程退出码和超时状态，不包装命令或使用完成标记，也不承诺该退出码等于工作命令的真实远端退出码。
 
 ## 技术方向
 

@@ -12,12 +12,12 @@ import (
 	winregistry "golang.org/x/sys/windows/registry"
 )
 
-func TestWindowsRuntimeDirectoryAndFileLock(t *testing.T) {
+func TestWindowsRuntimeDirectoryAndRegistryLock(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runtime")
 	if err := ensurePrivateDirectory(path); err != nil {
 		t.Fatal(err)
 	}
-	if err := withFileLock(filepath.Join(path, "session.lock"), func() error {
+	if err := withRegistryLock(path, func() error {
 		return os.WriteFile(filepath.Join(path, "inside"), []byte("locked"), 0o600)
 	}); err != nil {
 		t.Fatal(err)

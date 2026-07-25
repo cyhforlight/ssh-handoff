@@ -60,7 +60,7 @@ func (registry *sessionRegistry) create(
 		return nil, err
 	}
 	var created *session
-	err := withFileLock(filepath.Join(registry.dir, ".registry.lock"), func() error {
+	err := withRegistryLock(registry.dir, func() error {
 		sessions, err := registry.list()
 		if err != nil {
 			return err
@@ -96,10 +96,6 @@ func (registry *sessionRegistry) resolve(id string) (*session, error) {
 		}
 	}
 	return nil, fmt.Errorf("%w: %s", errSessionNotFound, id)
-}
-
-func (registry *sessionRegistry) withSessionLock(id string, action func() error) error {
-	return withFileLock(filepath.Join(registry.dir, id+".lock"), action)
 }
 
 func (registry *sessionRegistry) removeFiles(id string) {

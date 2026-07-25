@@ -62,8 +62,8 @@ func validatePrivateDirectory(path string) error {
 	return nil
 }
 
-func withFileLock(path string, action func() error) error {
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+func withRegistryLock(dir string, action func() error) error {
+	file, err := os.OpenFile(filepath.Join(dir, ".registry.lock"), os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return err
 	}

@@ -2,7 +2,7 @@
 
 用户在终端中建立的 SSH 连接由其中运行的 `ssh` 进程持有，Agent 无法直接使用。Agent 的每次命令调用都会启动独立进程，因此即使用户已经登录，Agent 也没有可复用的远端执行入口。
 
-ssh-handoff 将用户建立的 SSH 连接保存为本地可发现、可复用的 session。Agent 通过 session ID 复用同一条已认证 SSH transport，并为每条命令创建独立 channel；用户继续保留原始 Shell。
+ssh-handoff 将用户建立的 SSH 连接保存为本地可发现、可复用的 session。Agent 通过 session ID 复用同一条已认证 SSH transport，并为每条命令创建独立 channel；用户同时持有原始 Shell。
 
 ssh-handoff 支持 Linux、macOS、WSL 和原生 Windows。Linux、macOS 与 WSL 使用系统 OpenSSH 的 `ControlMaster`；Windows 使用 Plink connection sharing，并通过 ConPTY 保留完整的交互终端。
 
@@ -137,7 +137,7 @@ ssh-handoff run --stream --timeout 10m A3B4 'docker compose pull'
 {"type":"result","session":"A3B4","mode":"exec","exit_code":0,"timed_out":false}
 ```
 
-不加 `--stream` 时保持原有的单个 JSON 结果，适合只关心最终状态的短命令。
+默认模式在命令结束后输出单个 JSON 结果，适合只关心最终状态的短命令。
 
 ### `list`
 
@@ -153,7 +153,7 @@ ssh-handoff list
 ssh-handoff close A3B4
 ```
 
-关闭指定 session。ID 输入不区分大小写。
+关闭指定 session 及其 SSH transport。ID 输入不区分大小写；该 session 中正在执行的 `run` 可能随之中断。
 
 ### 帮助
 
@@ -169,7 +169,7 @@ ssh-handoff close A3B4
 └── 命令 channel：每次 run 单独新建
 ```
 
-`run` 的命令和输出不会进入原始终端，托管状态只作用于原始 Shell channel。每次 `run` 都是一次完整、同步、非交互的命令执行，调用方会等待该次结果，同一 session 的多次调用按顺序执行。命令 channel 在调用结束后关闭，不继承原始 Shell 或上一次 `run` 的工作目录、环境变量和历史状态。新 channel 的初始目录、环境和 Shell 初始化由远端 SSH 服务决定；需要共享状态的多个步骤应组合在同一个命令字符串中，并显式包含所需的 `cd` 和环境变量。
+`run` 的命令和输出不会进入原始终端，托管状态只作用于原始 Shell channel。每次 `run` 都是一次完整、同步、非交互的命令执行，各次调用通过独立 channel 彼此隔离，可以在同一 session 上并发；有先后依赖的操作应顺序发起。命令 channel 在调用结束后关闭，不继承原始 Shell 或上一次 `run` 的工作目录、环境变量和历史状态。新 channel 的初始目录、环境和 Shell 初始化由远端 SSH 服务决定；需要共享状态的多个步骤应组合在同一个命令字符串中，并显式包含所需的 `cd` 和环境变量。
 
 session 属于创建它的本地系统用户。Agent 需要以同一用户运行，并能访问相同的 runtime 目录及 OpenSSH control socket 或 PuTTY connection-sharing 命名管道；未共享这些路径的容器、其他 Windows 安全令牌、WSL 实例或隔离环境无法发现该 session。
 
