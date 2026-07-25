@@ -115,7 +115,6 @@ func (registry *sessionRegistry) withSessionLock(id string, action func() error)
 func (registry *sessionRegistry) removeFiles(id string) {
 	_ = os.Remove(registry.statePath(id))
 	removePlatformSessionFiles(registry.dir, id)
-	_ = os.Remove(filepath.Join(registry.dir, id+".lock"))
 }
 
 func (registry *sessionRegistry) write(session *session) error {
@@ -161,13 +160,13 @@ func (registry *sessionRegistry) loadAll() ([]*session, error) {
 		}
 		var session session
 		if err := json.Unmarshal(data, &session); err != nil {
-			return nil, fmt.Errorf("read session %s: %w", entry.Name(), err)
+			continue
 		}
 		if err := session.Connection.validate(); err != nil {
-			return nil, fmt.Errorf("read session %s: invalid connection: %w", entry.Name(), err)
+			continue
 		}
 		if err := validatePlatformConnection(session.Connection); err != nil {
-			return nil, fmt.Errorf("read session %s: %w", entry.Name(), err)
+			continue
 		}
 		sessions = append(sessions, &session)
 	}

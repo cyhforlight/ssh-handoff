@@ -85,16 +85,65 @@ func TestRegistryPersistsSessionAndPublishesInfo(t *testing.T) {
 	}
 }
 
-func TestRegistryRejectsLegacyCommandSession(t *testing.T) {
+func TestRegistrySkipsUnusableSessionFiles(t *testing.T) {
 	registry := &sessionRegistry{dir: filepath.Join(t.TempDir(), "runtime")}
 	if err := ensurePrivateDirectory(registry.dir); err != nil {
 		t.Fatal(err)
 	}
-	data := []byte(`{"id":"ABCD","connection_command":"ssh operator@example.com","mode":"exec","state":"interactive","pid":1}`)
-	if err := os.WriteFile(registry.statePath("ABCD"), data, 0o600); err != nil {
+	files := map[string]string{
+		"broken.json": `{`,
+		"legacy.json": `{"id":"ABCD","connection_command":"ssh operator@example.com","mode":"exec","state":"interactive","pid":1}`,
+	}
+	for name, data := range files {
+		if err := os.WriteFile(filepath.Join(registry.dir, name), []byte(data), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	created, err := registry.create("", modeExec, connectionSpec{
+		Host: "example.com",
+		User: "operator",
+		Port: 22,
+	})
+	if err != nil {
+		t.Fatalf("registry.create() with unusable session files: %v", err)
+	}
+	sessions, err := registry.list()
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := registry.loadAll(); err == nil || !strings.Contains(err.Error(), "invalid connection") {
-		t.Fatalf("registry.loadAll() error = %v, want invalid connection", err)
+	if len(sessions) != 1 || sessions[0].ID != created.ID {
+		t.Fatalf("registry.list() = %#v, want only session %s", sessions, created.ID)
+	}
+}
+
+func TestRegistryCleanupPreservesSessionLock(t *testing.T) {
+	registry := &sessionRegistry{dir: filepath.Join(t.TempDir(), "runtime")}
+	if err := ensurePrivateDirectory(registry.dir); err != nil {
+		t.Fatal(err)
+	}
+	session := &session{
+		ID:         "ABCD",
+		Connection: connectionSpec{Host: "example.com", User: "operator", Port: 22},
+		Mode:       modeExec,
+		PID:        -1,
+	}
+	if err := registry.write(session); err != nil {
+		t.Fatal(err)
+	}
+	lockPath := filepath.Join(registry.dir, session.ID+".lock")
+	if err := os.WriteFile(lockPath, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	sessions, err := registry.list()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 0 {
+		t.Fatalf("registry.list() returned dead session: %#v", sessions)
+	}
+	if _, err := os.Stat(lockPath); err != nil {
+		t.Fatalf("registry cleanup removed stable session lock: %v", err)
 	}
 }

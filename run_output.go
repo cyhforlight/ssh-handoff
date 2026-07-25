@@ -77,14 +77,12 @@ func (output *bufferedOutput) emit(stream outputStream, data []byte) error {
 }
 
 func (output *bufferedOutput) writeResult(status runStatus) error {
-	writeJSON(output.writer, output.result(status))
-	return nil
+	return writeJSON(output.writer, output.result(status))
 }
 
 func (output *bufferedOutput) writeError(code string, cause error) error {
 	response := commandError{Code: code, Message: cause.Error()}
-	writeJSON(output.writer, errorResponse{Error: response})
-	return nil
+	return writeJSON(output.writer, errorResponse{Error: response})
 }
 
 func (output *bufferedOutput) result(status runStatus) runResult {
@@ -192,11 +190,11 @@ func completeUTF8Prefix(data []byte) int {
 	return start
 }
 
-func writeJSON(output io.Writer, value any) {
+func writeJSON(output io.Writer, value any) error {
 	encoder := json.NewEncoder(output)
 	encoder.SetEscapeHTML(false)
 	encoder.SetIndent("", "  ")
-	_ = encoder.Encode(value)
+	return encoder.Encode(value)
 }
 
 type serializedOutput struct {

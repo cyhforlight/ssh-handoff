@@ -4,7 +4,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -66,6 +68,95 @@ func TestSSHArguments(t *testing.T) {
 	if got := command.Args[len(command.Args)-1]; got != remoteCommand {
 		t.Fatalf("remote command argument = %q, want %q", got, remoteCommand)
 	}
+}
+
+func TestExecuteSession(t *testing.T) {
+	installFakeSSH(t)
+	outputErr := errors.New("output failed")
+	tests := []struct {
+		name        string
+		mode        executionMode
+		command     string
+		timeout     time.Duration
+		emitErr     error
+		wantOutput  map[outputStream]string
+		wantExit    int
+		wantTimeout bool
+		wantErr     error
+	}{
+		{
+			name:       "exec output and exit code",
+			mode:       modeExec,
+			command:    "exec-result",
+			timeout:    time.Second,
+			wantOutput: map[outputStream]string{streamStdout: "server\n", streamStderr: "warning\n"},
+			wantExit:   7,
+		},
+		{
+			name:       "shell PTY input and output",
+			mode:       modeShellPTY,
+			command:    "echo hello",
+			timeout:    time.Second,
+			wantOutput: map[outputStream]string{streamOutput: "echo hello\nexit\n"},
+			wantExit:   0,
+		},
+		{name: "timeout", mode: modeExec, command: "timeout", timeout: 20 * time.Millisecond, wantExit: -1, wantTimeout: true},
+		{name: "output error wins over timeout", mode: modeExec, command: "output-timeout", timeout: 20 * time.Millisecond, emitErr: outputErr, wantErr: outputErr},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			session := &session{
+				ID:         "ABCD",
+				Connection: connectionSpec{Host: "example.com", User: "operator", Port: 22},
+				Mode:       test.mode,
+				Platform:   platformSessionState{ControlPath: filepath.Join(t.TempDir(), "control")},
+			}
+			output := make(map[outputStream]string)
+			status, err := executeSession(session, test.command, test.timeout, func(stream outputStream, data []byte) error {
+				if test.emitErr != nil {
+					return test.emitErr
+				}
+				output[stream] += string(data)
+				return nil
+			})
+			if !errors.Is(err, test.wantErr) {
+				t.Fatalf("executeSession() error = %v, want %v", err, test.wantErr)
+			}
+			if test.wantErr != nil {
+				return
+			}
+			exitCode := -1
+			if status.ExitCode != nil {
+				exitCode = *status.ExitCode
+			}
+			if status.Session != session.ID || status.Mode != test.mode ||
+				exitCode != test.wantExit || status.TimedOut != test.wantTimeout {
+				t.Fatalf("executeSession() status = %#v", status)
+			}
+			if !maps.Equal(output, test.wantOutput) {
+				t.Fatalf("executeSession() output = %#v, want %#v", output, test.wantOutput)
+			}
+		})
+	}
+}
+
+func installFakeSSH(t *testing.T) {
+	t.Helper()
+	bin := t.TempDir()
+	script := `#!/bin/sh
+case " $* " in
+*" -O check "*) exit 0 ;;
+*" exec-result "*) printf 'server\n'; printf 'warning\n' >&2; exit 7 ;;
+*" timeout "*) sleep 5 ;;
+*" output-timeout "*) printf x; sleep 5 ;;
+*) cat ;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(bin, "ssh"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
 }
 
 func TestSSHCommandContextBoundsInheritedOutput(t *testing.T) {

@@ -50,12 +50,12 @@ func executeSession(
 	// Run waits for its output copies, so no emit call outlives it.
 	err = cmd.Run()
 
+	if outputErr := streams.failure(); outputErr != nil {
+		return runStatus{}, outputErr
+	}
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		status.TimedOut = true
 		return status, nil
-	}
-	if outputErr := streams.failure(); outputErr != nil {
-		return runStatus{}, outputErr
 	}
 	exitCode := 0
 	if err != nil {

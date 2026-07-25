@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"testing"
 )
 
@@ -91,4 +92,20 @@ func TestBufferedRunOutputKeepsResultShape(t *testing.T) {
 	if got := buffer.String(); got != want {
 		t.Fatalf("buffered output = %q, want %q", got, want)
 	}
+}
+
+func TestBufferedRunOutputReportsWriteFailure(t *testing.T) {
+	writeErr := errors.New("write failed")
+	output := newRunOutput(errorWriter{err: writeErr}, false)
+	if err := output.writeResult(runStatus{}); !errors.Is(err, writeErr) {
+		t.Fatalf("writeResult() error = %v, want %v", err, writeErr)
+	}
+}
+
+type errorWriter struct {
+	err error
+}
+
+func (writer errorWriter) Write([]byte) (int, error) {
+	return 0, writer.err
 }

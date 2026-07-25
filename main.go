@@ -144,10 +144,11 @@ func runCommand(registry *sessionRegistry, args []string, stdin io.Reader, stdou
 	flags.SetOutput(io.Discard)
 	timeout := flags.Duration("timeout", defaultTimeout, "command timeout")
 	stream := flags.Bool("stream", false, "stream output as NDJSON")
-	if err := flags.Parse(args); err != nil {
-		return writeRunError(newRunOutput(stdout, *stream), "invalid_arguments", err)
-	}
+	parseErr := flags.Parse(args)
 	output := newRunOutput(stdout, *stream)
+	if parseErr != nil {
+		return writeRunError(output, "invalid_arguments", parseErr)
+	}
 	if flags.NArg() != 2 {
 		return writeRunError(output, "invalid_arguments", errors.New("usage: "+runUsage))
 	}
