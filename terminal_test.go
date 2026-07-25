@@ -30,10 +30,20 @@ func TestHandoffControllerSerializesInputAndKeepalive(t *testing.T) {
 	if _, err := controller.handleInput([]byte{handoffByte}); err != nil {
 		t.Fatal(err)
 	}
+	if controller.keepaliveTick == nil {
+		t.Fatal("managed state must schedule keepalive")
+	}
 	if err := controller.keepalive(); err != nil {
 		t.Fatal(err)
 	}
 	if want := "whoami\n:\n:\npwd\n:\n:\n"; remote.String() != want {
 		t.Fatalf("managed input = %q, want %q", remote.String(), want)
+	}
+
+	if _, err := controller.handleInput([]byte{handoffByte}); err != nil {
+		t.Fatal(err)
+	}
+	if controller.keepaliveTick != nil {
+		t.Fatal("returning to interactive state must stop keepalive")
 	}
 }

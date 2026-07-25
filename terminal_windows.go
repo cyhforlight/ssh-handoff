@@ -135,13 +135,6 @@ func serveOpenSession(
 	lastWidth, lastHeight := width, height
 
 	controller := handoffController{remote: terminal.Input}
-	var keepalive *time.Ticker
-	var keepaliveTick <-chan time.Time
-	defer func() {
-		if keepalive != nil {
-			keepalive.Stop()
-		}
-	}()
 
 	for {
 		select {
@@ -153,22 +146,10 @@ func serveOpenSession(
 				writeTextf(stderr, "\r\nssh-handoff: write session: %v\r\n", inputErr)
 				return 2
 			}
-			if !changed {
-				continue
+			if changed {
+				writeText(stderr, controller.handoffMessage(session.ID))
 			}
-			if keepalive != nil {
-				keepalive.Stop()
-			}
-			if controller.managed {
-				keepalive = time.NewTicker(keepaliveInterval)
-				keepaliveTick = keepalive.C
-				writeTextf(stderr, "\r\n[ssh-handoff] %s 已托管；按 Ctrl-] 恢复交互。\r\n", session.ID)
-			} else {
-				keepalive = nil
-				keepaliveTick = nil
-				writeTextf(stderr, "\r\n[ssh-handoff] %s 已恢复交互；按 Ctrl-] 再次托管。\r\n", session.ID)
-			}
-		case <-keepaliveTick:
+		case <-controller.keepaliveTick:
 			if err := controller.keepalive(); err != nil {
 				terminal.Terminate()
 				<-processDone

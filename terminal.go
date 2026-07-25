@@ -7,14 +7,15 @@ import (
 )
 
 const (
-	keepaliveInterval = 30 * time.Minute
+	keepaliveInterval = 10 * time.Minute
 	handoffByte       = byte(0x1d) // Ctrl-]
 	noopCommand       = ":\n"
 )
 
 type handoffController struct {
-	remote  io.Writer
-	managed bool
+	remote        io.Writer
+	managed       bool
+	keepaliveTick <-chan time.Time
 }
 
 func (controller *handoffController) handleInput(input []byte) (bool, error) {
@@ -44,10 +45,26 @@ func (controller *handoffController) handleInput(input []byte) (bool, error) {
 		changed = true
 		segmentStart = index + 1
 	}
-	if controller.managed {
-		return changed, nil
+
+	if !controller.managed {
+		if err := write(input[segmentStart:]); err != nil {
+			return changed, err
+		}
 	}
-	return changed, write(input[segmentStart:])
+	if changed {
+		controller.keepaliveTick = nil
+		if controller.managed {
+			controller.keepaliveTick = time.Tick(keepaliveInterval)
+		}
+	}
+	return changed, nil
+}
+
+func (controller *handoffController) handoffMessage(sessionID string) string {
+	if controller.managed {
+		return "\r\n[ssh-handoff] " + sessionID + " 已托管；按 Ctrl-] 恢复交互。\r\n"
+	}
+	return "\r\n[ssh-handoff] " + sessionID + " 已恢复交互；按 Ctrl-] 再次托管。\r\n"
 }
 
 func (controller *handoffController) keepalive() error {

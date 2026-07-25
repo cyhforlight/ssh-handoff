@@ -24,7 +24,7 @@ ssh-handoff open --host internal.example.com --user operator --identity ~/.ssh/i
 
 Linux、macOS 与 WSL 还可用 `--profile myserver` 接入 OpenSSH profile，等价于用户平时执行 `ssh myserver`。HostName、User、Port、IdentityFile、ProxyJump 等配置由 OpenSSH 从 `~/.ssh/config` 原生读取。profile 与 direct 参数完全互斥。Windows Plink 后端明确拒绝 profile，也不读取 OpenSSH config、接入 PuTTY saved session 或实现配置转换。
 
-`open` 保持在前台，用户在这个窗口中完成密码、MFA、扫码、主机指纹确认或堡垒机选机。工具会提示用户在进入目标 Shell 后准备托管。用户在空闲 prompt 上按 `Ctrl-]` 切换为托管状态，再按一次退出托管；两次切换各执行一次空指令进行同步。托管期间原始 Shell 不再接受普通用户输入，并且每 30 分钟执行一次空指令以维持会话活跃，但不承载 Agent 的工作命令。
+`open` 保持在前台，用户在这个窗口中完成密码、MFA、扫码、主机指纹确认或堡垒机选机。工具会提示用户在进入目标 Shell 后准备托管。用户在空闲 prompt 上按 `Ctrl-]` 切换为托管状态，再按一次退出托管；两次切换各执行一次空指令进行同步。托管期间原始 Shell 不再接受普通用户输入，并且每 10 分钟执行一次空指令以维持会话活跃，但不承载 Agent 的工作命令。
 
 连接建立后，工具生成一个简短的 session ID，作为 `run` 和 `close` 唯一接受的 session 引用。用户可以通过 `--note` 添加可选备注；备注只用于展示，不要求唯一，也不参与查找。`list` 同时返回 ID、规范化连接信息和备注，方便辨认不同 session。
 
@@ -57,7 +57,7 @@ close  按 ID 关闭指定 session
 
 一个 session 包含两个职责不同的部分：
 
-- **保活 Shell**：用户认证时进入的原始交互 Shell。进入托管状态后，工具定期向它写入空指令，避免 JumpServer 一类服务因原始会话长时间无操作而断开；v1 的固定间隔为 30 分钟；
+- **保活 Shell**：用户认证时进入的原始交互 Shell。进入托管状态后，工具定期向它写入空指令，避免 JumpServer 一类服务因原始会话长时间无操作而断开；v1 的固定间隔为 10 分钟；
 - **执行 channel**：Agent 每次调用 `run` 时，通过同一条已认证 transport 新建的 channel。工作命令不会写入保活 Shell，也不依赖其中的 `cwd`、环境变量或历史状态。
 
 连接托管与命令执行是两个独立维度。无论使用哪种执行模式，原始 Shell 都只承担认证、人工接管和保活；Agent 始终使用新建的执行 channel。
