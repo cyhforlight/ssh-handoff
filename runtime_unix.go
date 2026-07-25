@@ -3,6 +3,7 @@
 package main
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"os"
@@ -26,10 +27,7 @@ func removePlatformSessionFiles(dir, id string) {
 }
 
 func runtimeDirectory() string {
-	base := os.Getenv("XDG_RUNTIME_DIR")
-	if base == "" {
-		base = os.TempDir()
-	}
+	base := cmp.Or(os.Getenv("XDG_RUNTIME_DIR"), os.TempDir())
 	dir := filepath.Join(base, fmt.Sprintf("ssh-handoff-%d", os.Getuid()))
 	if len(filepath.Join(dir, "ABCD.sock")) > maximumControlPath {
 		dir = filepath.Join("/tmp", fmt.Sprintf("ssh-handoff-%d", os.Getuid()))

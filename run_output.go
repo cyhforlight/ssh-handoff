@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"slices"
 	"sync"
 	"unicode/utf8"
 )
@@ -37,9 +38,9 @@ type errorResponse struct {
 
 type runResult struct {
 	runStatus
-	Stdout *string `json:"stdout,omitempty"`
-	Stderr *string `json:"stderr,omitempty"`
-	Output *string `json:"output,omitempty"`
+	Stdout *string `json:"stdout,omitzero"`
+	Stderr *string `json:"stderr,omitzero"`
+	Output *string `json:"output,omitzero"`
 }
 
 type runOutput interface {
@@ -125,12 +126,10 @@ func newNDJSONOutput(writer io.Writer) *ndjsonOutput {
 }
 
 func (output *ndjsonOutput) emit(stream outputStream, data []byte) error {
-	combined := make([]byte, 0, len(output.carry[stream])+len(data))
-	combined = append(combined, output.carry[stream]...)
-	combined = append(combined, data...)
+	combined := slices.Concat(output.carry[stream], data)
 
 	complete := completeUTF8Prefix(combined)
-	output.carry[stream] = append([]byte(nil), combined[complete:]...)
+	output.carry[stream] = bytes.Clone(combined[complete:])
 	if complete == 0 {
 		return nil
 	}

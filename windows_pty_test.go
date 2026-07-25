@@ -3,6 +3,7 @@
 package main
 
 import (
+	"cmp"
 	"io"
 	"os"
 	"strings"
@@ -10,10 +11,7 @@ import (
 )
 
 func TestWindowsPTYRunsConsoleProcess(t *testing.T) {
-	path := os.Getenv("ComSpec")
-	if path == "" {
-		path = `C:\Windows\System32\cmd.exe`
-	}
+	path := cmp.Or(os.Getenv("ComSpec"), `C:\Windows\System32\cmd.exe`)
 	terminal, err := startWindowsPTY(
 		path,
 		[]string{"/d", "/c", "echo __SSH_HANDOFF_CONPTY__"},
@@ -52,10 +50,7 @@ func TestWindowsPTYRunsConsoleProcess(t *testing.T) {
 }
 
 func TestWindowsPTYTerminatesProcessJob(t *testing.T) {
-	path := os.Getenv("ComSpec")
-	if path == "" {
-		path = `C:\Windows\System32\cmd.exe`
-	}
+	path := cmp.Or(os.Getenv("ComSpec"), `C:\Windows\System32\cmd.exe`)
 	terminal, err := startWindowsPTY(
 		path,
 		[]string{"/d", "/c", "ping -n 30 127.0.0.1 >nul"},

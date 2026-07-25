@@ -3,6 +3,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -348,17 +349,13 @@ func waitForPlinkShare(session *session, timeout time.Duration) error {
 			return err
 		}
 		if !processAlive(session.Platform.PlinkPID) {
-			if message == "" {
-				message = "Plink master exited before publishing its shared connection"
-			}
+			message = cmp.Or(message, "Plink master exited before publishing its shared connection")
 			return errors.New(message)
 		}
 
 		select {
 		case <-ctx.Done():
-			if message == "" {
-				message = "shared Plink connection did not become available"
-			}
+			message = cmp.Or(message, "shared Plink connection did not become available")
 			return fmt.Errorf("%s: %w", message, ctx.Err())
 		case <-time.After(50 * time.Millisecond):
 		}
@@ -382,9 +379,7 @@ func checkSession(session *session) error {
 	if exists {
 		return nil
 	}
-	if message == "" {
-		message = "shared Plink connection was not found"
-	}
+	message = cmp.Or(message, "shared Plink connection was not found")
 	return &sessionUnavailableError{
 		message: fmt.Sprintf("session %s is unavailable: %s", session.ID, message),
 	}

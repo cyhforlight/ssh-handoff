@@ -3,6 +3,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -96,10 +97,7 @@ func checkSession(session *session) error {
 	if err == nil {
 		return nil
 	}
-	message := strings.TrimSpace(string(output))
-	if message == "" {
-		message = err.Error()
-	}
+	message := cmp.Or(strings.TrimSpace(string(output)), err.Error())
 	return &sessionUnavailableError{message: fmt.Sprintf("session %s is unavailable: %s", session.ID, message)}
 }
 

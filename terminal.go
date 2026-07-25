@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"io"
 	"os"
 	"time"
@@ -80,7 +81,7 @@ func readTerminalInput(input *os.File, output chan<- []byte, failures chan<- err
 	for {
 		count, err := input.Read(buffer)
 		if count > 0 {
-			data := append([]byte(nil), buffer[:count]...)
+			data := bytes.Clone(buffer[:count])
 			output <- data
 		}
 		if err != nil {

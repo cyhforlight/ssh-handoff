@@ -7,11 +7,11 @@ import (
 )
 
 type connectionSpec struct {
-	Profile  string `json:"profile,omitempty"`
-	Host     string `json:"host,omitempty"`
-	User     string `json:"user,omitempty"`
-	Port     int    `json:"port,omitempty"`
-	Identity string `json:"identity,omitempty"`
+	Profile  string `json:"profile,omitzero"`
+	Host     string `json:"host,omitzero"`
+	User     string `json:"user,omitzero"`
+	Port     int    `json:"port,omitzero"`
+	Identity string `json:"identity,omitzero"`
 }
 
 func (connection connectionSpec) validate() error {

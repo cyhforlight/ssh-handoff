@@ -13,8 +13,8 @@ import (
 )
 
 type platformSessionState struct {
-	PlinkPath string `json:"plink_path,omitempty"`
-	PlinkPID  int    `json:"plink_pid,omitempty"`
+	PlinkPath string `json:"plink_path,omitzero"`
+	PlinkPID  int    `json:"plink_pid,omitzero"`
 }
 
 func newPlatformSessionState(_, _ string) platformSessionState {

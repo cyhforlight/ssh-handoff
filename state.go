@@ -21,7 +21,7 @@ const (
 type session struct {
 	ID         string               `json:"id"`
 	Connection connectionSpec       `json:"connection"`
-	Note       string               `json:"note,omitempty"`
+	Note       string               `json:"note,omitzero"`
 	Mode       executionMode        `json:"mode"`
 	Platform   platformSessionState `json:"platform"`
 	PID        int                  `json:"pid"`

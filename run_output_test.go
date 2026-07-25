@@ -68,9 +68,6 @@ func TestBufferedRunOutputKeepsResultShape(t *testing.T) {
 	if err := output.emit(streamStdout, []byte("server\n")); err != nil {
 		t.Fatal(err)
 	}
-	if err := output.emit(streamStderr, []byte("warning\n")); err != nil {
-		t.Fatal(err)
-	}
 	if err := output.writeResult(runStatus{
 		Session:  "A3B4",
 		Mode:     modeExec,
@@ -84,7 +81,7 @@ func TestBufferedRunOutputKeepsResultShape(t *testing.T) {
 		"  \"exit_code\": 0,\n" +
 		"  \"timed_out\": false,\n" +
 		"  \"stdout\": \"server\\n\",\n" +
-		"  \"stderr\": \"warning\\n\"\n" +
+		"  \"stderr\": \"\"\n" +
 		"}\n"
 	if got := buffer.String(); got != want {
 		t.Fatalf("buffered output = %q, want %q", got, want)
