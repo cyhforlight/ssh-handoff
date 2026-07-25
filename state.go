@@ -26,18 +26,14 @@ const (
 	stateManaged     sessionState = "managed"
 )
 
-type sessionInfo struct {
-	ID         string         `json:"id"`
-	Connection connectionSpec `json:"connection"`
-	Note       string         `json:"note,omitempty"`
-	Mode       executionMode  `json:"mode"`
-	State      sessionState   `json:"state"`
-}
-
 type session struct {
-	sessionInfo
-	Platform platformSessionState `json:"platform"`
-	PID      int                  `json:"pid"`
+	ID         string               `json:"id"`
+	Connection connectionSpec       `json:"connection"`
+	Note       string               `json:"note,omitempty"`
+	Mode       executionMode        `json:"mode"`
+	State      sessionState         `json:"state"`
+	Platform   platformSessionState `json:"platform"`
+	PID        int                  `json:"pid"`
 }
 
 type sessionRegistry struct {
@@ -81,15 +77,13 @@ func (registry *sessionRegistry) create(
 
 		id := newSessionID(sessions)
 		created = &session{
-			sessionInfo: sessionInfo{
-				ID:         id,
-				Connection: connection,
-				Note:       note,
-				Mode:       mode,
-				State:      stateStarting,
-			},
-			Platform: newPlatformSessionState(registry.dir, id),
-			PID:      os.Getpid(),
+			ID:         id,
+			Connection: connection,
+			Note:       note,
+			Mode:       mode,
+			State:      stateStarting,
+			Platform:   newPlatformSessionState(registry.dir, id),
+			PID:        os.Getpid(),
 		}
 		return registry.write(created)
 	})
@@ -116,10 +110,6 @@ func (registry *sessionRegistry) resolve(id string) (*session, error) {
 
 func (registry *sessionRegistry) withSessionLock(id string, action func() error) error {
 	return withFileLock(filepath.Join(registry.dir, id+".lock"), action)
-}
-
-func (registry *sessionRegistry) remove(id string) {
-	registry.removeFiles(id)
 }
 
 func (registry *sessionRegistry) removeFiles(id string) {

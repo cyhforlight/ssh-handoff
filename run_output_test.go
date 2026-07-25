@@ -83,10 +83,10 @@ func TestBufferedRunOutputKeepsResultShape(t *testing.T) {
 	want := "{\n" +
 		"  \"session\": \"A3B4\",\n" +
 		"  \"mode\": \"exec\",\n" +
-		"  \"stdout\": \"server\\n\",\n" +
-		"  \"stderr\": \"warning\\n\",\n" +
 		"  \"exit_code\": 0,\n" +
-		"  \"timed_out\": false\n" +
+		"  \"timed_out\": false,\n" +
+		"  \"stdout\": \"server\\n\",\n" +
+		"  \"stderr\": \"warning\\n\"\n" +
 		"}\n"
 	if got := buffer.String(); got != want {
 		t.Fatalf("buffered output = %q, want %q", got, want)

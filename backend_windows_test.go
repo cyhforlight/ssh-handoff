@@ -26,16 +26,14 @@ func TestPlinkArgumentsPreserveExecutionMode(t *testing.T) {
 		}
 	}
 	session := &session{
-		sessionInfo: sessionInfo{
-			ID: "A3B4",
-			Connection: connectionSpec{
-				Host:     "2001:db8::10",
-				User:     "JMS-token",
-				Port:     2222,
-				Identity: `C:\Keys\operator.ppk`,
-			},
-			Mode: modeExec,
+		ID: "A3B4",
+		Connection: connectionSpec{
+			Host:     "2001:db8::10",
+			User:     "JMS-token",
+			Port:     2222,
+			Identity: `C:\Keys\operator.ppk`,
 		},
+		Mode: modeExec,
 	}
 
 	wantMaster := []string{
@@ -101,29 +99,5 @@ func TestResolveConfiguredPlinkPath(t *testing.T) {
 	}
 	if got != path {
 		t.Fatalf("resolvePlinkPath() = %q, want %q", got, path)
-	}
-}
-
-func TestUniquePlinkTargetRejectsAnotherOwner(t *testing.T) {
-	registry := &sessionRegistry{dir: filepath.Join(t.TempDir(), "runtime")}
-	create := func(host string) *session {
-		t.Helper()
-		session, err := registry.create("", modeExec, connectionSpec{
-			Host: host,
-			User: "operator",
-			Port: 2222,
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { registry.remove(session.ID) })
-		return session
-	}
-	first := create("Jump.Example.com")
-	second := create("jump.example.com")
-
-	err := ensureUniquePlinkTarget(registry, second)
-	if err == nil || !strings.Contains(err.Error(), first.ID) {
-		t.Fatalf("ensureUniquePlinkTarget() error = %v, want conflict with %s", err, first.ID)
 	}
 }

@@ -79,7 +79,7 @@ func openCommand(registry *sessionRegistry, args []string, stdin *os.File, stdou
 		writeTextf(stderr, "ssh-handoff open: %v\n", err)
 		return 2
 	}
-	defer registry.remove(session.ID)
+	defer registry.removeFiles(session.ID)
 
 	writeTextf(stderr, "[ssh-handoff] session %s\n", session.ID)
 	if session.Note != "" {

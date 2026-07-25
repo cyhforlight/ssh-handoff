@@ -5,11 +5,9 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"os/signal"
-	"strings"
 	"time"
 
 	"golang.org/x/sys/windows"
@@ -30,10 +28,6 @@ func serveOpenSession(
 ) int {
 	if !term.IsTerminal(int(stdin.Fd())) {
 		writeText(stderr, "ssh-handoff open: stdin must be a terminal\n")
-		return 2
-	}
-	if err := ensureUniquePlinkTarget(registry, session); err != nil {
-		writeTextf(stderr, "ssh-handoff open: %v\n", err)
 		return 2
 	}
 	path, err := resolvePlinkPath()
@@ -217,31 +211,6 @@ func serveOpenSession(
 			return 1
 		}
 	}
-}
-
-func ensureUniquePlinkTarget(
-	registry *sessionRegistry,
-	current *session,
-) error {
-	sessions, err := registry.list()
-	if err != nil {
-		return err
-	}
-	for _, candidate := range sessions {
-		if candidate.ID == current.ID {
-			continue
-		}
-		if candidate.Connection.Port == current.Connection.Port &&
-			candidate.Connection.User == current.Connection.User &&
-			strings.EqualFold(candidate.Connection.Host, current.Connection.Host) {
-			return fmt.Errorf(
-				"session %s already owns the Plink sharing target %s",
-				candidate.ID,
-				current.Connection.targetLabel(),
-			)
-		}
-	}
-	return nil
 }
 
 func useUTF8Console() (func(), error) {

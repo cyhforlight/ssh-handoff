@@ -20,10 +20,10 @@ const (
 type outputSink func(outputStream, []byte) error
 
 type runStatus struct {
-	Session  string
-	Mode     executionMode
-	ExitCode *int
-	TimedOut bool
+	Session  string        `json:"session"`
+	Mode     executionMode `json:"mode"`
+	ExitCode *int          `json:"exit_code"`
+	TimedOut bool          `json:"timed_out"`
 }
 
 type commandError struct {
@@ -36,13 +36,10 @@ type errorResponse struct {
 }
 
 type runResult struct {
-	Session  string        `json:"session"`
-	Mode     executionMode `json:"mode"`
-	Stdout   *string       `json:"stdout,omitempty"`
-	Stderr   *string       `json:"stderr,omitempty"`
-	Output   *string       `json:"output,omitempty"`
-	ExitCode *int          `json:"exit_code"`
-	TimedOut bool          `json:"timed_out"`
+	runStatus
+	Stdout *string `json:"stdout,omitempty"`
+	Stderr *string `json:"stderr,omitempty"`
+	Output *string `json:"output,omitempty"`
 }
 
 type runOutput interface {
@@ -91,12 +88,7 @@ func (output *bufferedOutput) writeError(code string, cause error) error {
 }
 
 func (output *bufferedOutput) result(status runStatus) runResult {
-	result := runResult{
-		Session:  status.Session,
-		Mode:     status.Mode,
-		ExitCode: status.ExitCode,
-		TimedOut: status.TimedOut,
-	}
+	result := runResult{runStatus: status}
 	if status.Mode == modeExec {
 		stdout, stderr := output.stdout.String(), output.stderr.String()
 		result.Stdout, result.Stderr = &stdout, &stderr
@@ -113,11 +105,8 @@ type outputEvent struct {
 }
 
 type resultEvent struct {
-	Type     string        `json:"type"`
-	Session  string        `json:"session"`
-	Mode     executionMode `json:"mode"`
-	ExitCode *int          `json:"exit_code"`
-	TimedOut bool          `json:"timed_out"`
+	Type string `json:"type"`
+	runStatus
 }
 
 type errorEvent struct {
@@ -157,11 +146,8 @@ func (output *ndjsonOutput) writeResult(status runStatus) error {
 		return err
 	}
 	return output.encoder.Encode(resultEvent{
-		Type:     "result",
-		Session:  status.Session,
-		Mode:     status.Mode,
-		ExitCode: status.ExitCode,
-		TimedOut: status.TimedOut,
+		Type:      "result",
+		runStatus: status,
 	})
 }
 

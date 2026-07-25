@@ -20,15 +20,13 @@ func TestSSHArguments(t *testing.T) {
 		}
 	}
 	session := &session{
-		sessionInfo: sessionInfo{
-			Connection: connectionSpec{
-				Host:     "2001:db8::10",
-				User:     "operator",
-				Port:     2222,
-				Identity: "/keys/work key",
-			},
-			Mode: modeExec,
+		Connection: connectionSpec{
+			Host:     "2001:db8::10",
+			User:     "operator",
+			Port:     2222,
+			Identity: "/keys/work key",
 		},
+		Mode:     modeExec,
 		Platform: platformSessionState{ControlPath: "/tmp/control socket"},
 	}
 
