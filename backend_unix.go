@@ -18,6 +18,12 @@ var errInvalidSSHCommand = errors.New("ssh command must start with 'ssh ' and in
 
 const childIOWaitDelay = 100 * time.Millisecond
 
+func platformOpenHelp() string {
+	return `
+当前平台使用系统 OpenSSH，并保留连接命令中的参数和配置。
+`
+}
+
 func injectSSH(command string, options ...string) (string, error) {
 	if len(command) < 4 || !strings.HasPrefix(command, "ssh") {
 		return "", errInvalidSSHCommand

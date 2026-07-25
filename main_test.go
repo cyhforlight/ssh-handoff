@@ -47,3 +47,11 @@ func TestRunStreamWritesNDJSONError(t *testing.T) {
 		t.Fatalf("run writes stderr: %s", stderr.String())
 	}
 }
+
+func TestNormalizeStdinCommandUsesPOSIXLineEndings(t *testing.T) {
+	input := []byte("first\r\nsecond\nthird\rfourth\r\n")
+	want := "first\nsecond\nthird\rfourth\n"
+	if got := normalizeStdinCommand(input); got != want {
+		t.Fatalf("normalizeStdinCommand() = %q, want %q", got, want)
+	}
+}
