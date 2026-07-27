@@ -50,6 +50,15 @@ func TestSSHArguments(t *testing.T) {
 	}
 	assertArgs("sshDownstreamArgs()", sshDownstreamArgs(session), wantExec)
 
+	remoteCommand := `printf '%s\n' "hello world"`
+	command, _, err := newSessionCommand(context.Background(), session, remoteCommand)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := command.Args[len(command.Args)-1]; got != remoteCommand {
+		t.Fatalf("remote command argument = %q, want %q", got, remoteCommand)
+	}
+
 	session.Mode = modeShellPTY
 	wantPTY := slices.Insert(slices.Clone(wantExec), 8, "-tt")
 	assertArgs("sshDownstreamArgs()", sshDownstreamArgs(session), wantPTY)
@@ -63,12 +72,6 @@ func TestSSHArguments(t *testing.T) {
 		"-tt", "--", "myserver",
 	}
 	assertArgs("sshDownstreamArgs()", sshDownstreamArgs(session), wantProfile)
-
-	remoteCommand := `printf '%s\n' "hello world"`
-	command := sshCommandContext(context.Background(), append(sshDownstreamArgs(session), remoteCommand)...)
-	if got := command.Args[len(command.Args)-1]; got != remoteCommand {
-		t.Fatalf("remote command argument = %q, want %q", got, remoteCommand)
-	}
 }
 
 func TestExecuteSession(t *testing.T) {
