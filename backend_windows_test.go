@@ -159,7 +159,7 @@ func TestPlinkArgumentsPreserveExecutionMode(t *testing.T) {
 	}
 
 	wantMaster := []string{
-		"-load", "ssh-handoff-A3B4-upstream", "-ssh", "-share", "-t",
+		"-load", "ssh-handoff-A3B4-upstream", "-ssh", "-share", "-no-antispoof", "-t",
 		"-P", "2222", "-l", "JMS-token", "-i", `C:\Keys\operator.ppk`,
 		"2001:db8::10",
 	}

@@ -217,6 +217,7 @@ func plinkMasterArgs(session *session) []string {
 		"-load", plinkProfileName(session.ID, plinkProfileUpstream),
 		"-ssh",
 		"-share",
+		"-no-antispoof",
 		"-t",
 	}
 	return append(arguments, plinkTargetArgs(session.Connection, true)...)
