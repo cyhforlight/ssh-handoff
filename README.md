@@ -101,7 +101,7 @@ ssh-handoff run [--stream] [--timeout DURATION] [--shell-ready-delay DURATION] <
 ssh-handoff run --timeout 2m A3B4 'kubectl get nodes -o wide'
 ```
 
-`--shell-ready-delay` 只作用于 `shell-pty` session，默认为 1 秒。新建命令 channel 后，ssh-handoff 先发送一个回车，等待远端 Shell 就绪，再发送工作命令和 `exit`；设为 `0` 可以取消等待。该等待不会缩短 `--timeout` 指定的命令执行时间，SSH 子进程提前退出时也会立即结束。
+`--shell-ready-delay` 只作用于 `shell-pty` session，默认为 `0`。新建命令 channel 后，ssh-handoff 在可选的额外等待结束后依次发送工作命令和 `exit`，并保持输入开启，直到远端主动结束 channel 或执行超时。额外等待不会缩短 `--timeout` 指定的命令执行时间，SSH 子进程提前退出时也会立即结束。
 
 命令参数为 `-` 时，ssh-handoff 从本地标准输入读取完整命令文本，适合执行包含多层引号或多行内容的脚本：
 

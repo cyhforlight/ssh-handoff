@@ -101,7 +101,7 @@ func TestExecuteSession(t *testing.T) {
 			mode:       modeShellPTY,
 			command:    "echo hello",
 			timeout:    time.Second,
-			wantOutput: map[outputStream]string{streamOutput: "\necho hello\nexit\n"},
+			wantOutput: map[outputStream]string{streamOutput: "hello\n"},
 			wantExit:   0,
 		},
 		{
@@ -167,10 +167,10 @@ func installFakeSSH(t *testing.T) {
 case " $* " in
 *" -O check "*) exit 0 ;;
 *" exec-result "*) printf 'server\n'; printf 'warning\n' >&2; exit 7 ;;
-*" startup-failure "*) IFS= read -r _; printf 'startup failed\n' >&2; exit 255 ;;
+*" startup-failure "*) printf 'startup failed\n' >&2; exit 255 ;;
 *" timeout "*) sleep 5 ;;
 *" output-timeout "*) printf x; sleep 5 ;;
-*) cat ;;
+*) while IFS= read -r line; do eval "$line"; done ;;
 esac
 `
 	if err := os.WriteFile(filepath.Join(bin, "ssh"), []byte(script), 0o700); err != nil {

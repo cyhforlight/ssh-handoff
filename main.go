@@ -13,7 +13,7 @@ import (
 
 const (
 	defaultTimeout         = time.Minute
-	defaultShellReadyDelay = time.Second
+	defaultShellReadyDelay = 0
 )
 
 const (
@@ -311,7 +311,7 @@ func helpText(command string) (string, bool) {
 选项:
   --stream                       以 NDJSON 实时输出
   --timeout DURATION             命令超时时间（默认 1m）
-  --shell-ready-delay DURATION   shell-pty 发送命令前等待时间（默认 1s）
+  --shell-ready-delay DURATION   shell-pty 发送命令前的额外等待（默认 0）
 
 session ID 输入不区分大小写。执行模式由 open 时的 --mode 决定。
 命令参数为 - 时，从本地标准输入读取完整命令文本。

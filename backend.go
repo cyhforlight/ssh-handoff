@@ -56,22 +56,28 @@ func executeSession(
 		if err == nil {
 			processDone := make(chan error, 1)
 			go func() { processDone <- cmd.Wait() }()
-			if _, inputErr = io.WriteString(input, "\n"); inputErr == nil {
-				timer := time.NewTimer(shellReadyDelay)
-				select {
-				case err = <-processDone:
-					timer.Stop()
-				case <-timer.C:
-					_, inputErr = io.WriteString(
-						input,
-						strings.TrimRight(remoteCommand, "\n")+"\nexit\n",
-					)
+			timer := time.NewTimer(shellReadyDelay)
+			select {
+			case err = <-processDone:
+				timer.Stop()
+			case <-ctx.Done():
+				timer.Stop()
+				err = <-processDone
+			case <-timer.C:
+				_, inputErr = io.WriteString(
+					input,
+					strings.TrimRight(remoteCommand, "\n")+"\nexit\n",
+				)
+				if inputErr == nil {
+					select {
+					case err = <-processDone:
+					case <-ctx.Done():
+						err = <-processDone
+					}
+				} else {
 					_ = input.Close()
 					err = <-processDone
 				}
-			} else {
-				_ = input.Close()
-				err = <-processDone
 			}
 		}
 		_ = input.Close()
