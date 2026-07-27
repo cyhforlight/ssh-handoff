@@ -11,11 +11,14 @@ import (
 	"time"
 )
 
-const defaultTimeout = time.Minute
+const (
+	defaultTimeout         = time.Minute
+	defaultShellReadyDelay = time.Second
+)
 
 const (
 	openUsage  = "ssh-handoff open --host HOST --user USER [--port PORT] [--identity FILE] [--mode exec|shell-pty] [--note NOTE]\n  ssh-handoff open --profile NAME [--mode exec|shell-pty] [--note NOTE]"
-	runUsage   = "ssh-handoff run [--stream] [--timeout DURATION] <session-id> <command|->"
+	runUsage   = "ssh-handoff run [--stream] [--timeout DURATION] [--shell-ready-delay DURATION] <session-id> <command|->"
 	listUsage  = "ssh-handoff list"
 	closeUsage = "ssh-handoff close <session-id>"
 )
@@ -143,6 +146,11 @@ func runCommand(registry *sessionRegistry, args []string, stdin io.Reader, stdou
 	flags := flag.NewFlagSet("run", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	timeout := flags.Duration("timeout", defaultTimeout, "command timeout")
+	shellReadyDelay := flags.Duration(
+		"shell-ready-delay",
+		defaultShellReadyDelay,
+		"delay before sending a shell-pty command",
+	)
 	stream := flags.Bool("stream", false, "stream output as NDJSON")
 	parseErr := flags.Parse(args)
 	output := newRunOutput(stdout, *stream)
@@ -154,6 +162,13 @@ func runCommand(registry *sessionRegistry, args []string, stdin io.Reader, stdou
 	}
 	if *timeout <= 0 {
 		return writeRunError(output, "invalid_arguments", errors.New("timeout must be greater than zero"))
+	}
+	if *shellReadyDelay < 0 {
+		return writeRunError(
+			output,
+			"invalid_arguments",
+			errors.New("shell-ready-delay must not be negative"),
+		)
 	}
 
 	session, err := registry.resolve(flags.Arg(0))
@@ -170,7 +185,7 @@ func runCommand(registry *sessionRegistry, args []string, stdin io.Reader, stdou
 		command = normalizeStdinCommand(data)
 	}
 
-	status, err := executeSession(session, command, *timeout, output.emit)
+	status, err := executeSession(session, command, *timeout, *shellReadyDelay, output.emit)
 	if err != nil {
 		return writeRunExecutionError(output, err)
 	}
@@ -294,8 +309,9 @@ func helpText(command string) (string, bool) {
   ` + runUsage + `
 
 选项:
-  --stream             以 NDJSON 实时输出
-  --timeout DURATION   超时时间（默认 1m）
+  --stream                       以 NDJSON 实时输出
+  --timeout DURATION             命令超时时间（默认 1m）
+  --shell-ready-delay DURATION   shell-pty 发送命令前等待时间（默认 1s）
 
 session ID 输入不区分大小写。执行模式由 open 时的 --mode 决定。
 命令参数为 - 时，从本地标准输入读取完整命令文本。

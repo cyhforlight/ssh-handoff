@@ -3,6 +3,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"io"
@@ -76,8 +77,11 @@ func TestExecuteSession(t *testing.T) {
 	tests := []struct {
 		name        string
 		mode        executionMode
+		host        string
 		command     string
 		timeout     time.Duration
+		readyDelay  time.Duration
+		wantBefore  time.Duration
 		emitErr     error
 		wantOutput  map[outputStream]string
 		wantExit    int
@@ -97,8 +101,19 @@ func TestExecuteSession(t *testing.T) {
 			mode:       modeShellPTY,
 			command:    "echo hello",
 			timeout:    time.Second,
-			wantOutput: map[outputStream]string{streamOutput: "echo hello\nexit\n"},
+			wantOutput: map[outputStream]string{streamOutput: "\necho hello\nexit\n"},
 			wantExit:   0,
+		},
+		{
+			name:       "shell PTY startup failure",
+			mode:       modeShellPTY,
+			host:       "startup-failure",
+			command:    "ignored",
+			timeout:    time.Second,
+			readyDelay: 2 * time.Second,
+			wantBefore: 2 * time.Second,
+			wantOutput: map[outputStream]string{streamOutput: "startup failed\n"},
+			wantExit:   255,
 		},
 		{name: "timeout", mode: modeExec, command: "timeout", timeout: 20 * time.Millisecond, wantExit: -1, wantTimeout: true},
 		{name: "output error wins over timeout", mode: modeExec, command: "output-timeout", timeout: 20 * time.Millisecond, emitErr: outputErr, wantErr: outputErr},
@@ -108,18 +123,22 @@ func TestExecuteSession(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			session := &session{
 				ID:         "ABCD",
-				Connection: connectionSpec{Host: "example.com", User: "operator", Port: 22},
+				Connection: connectionSpec{Host: cmp.Or(test.host, "example.com"), User: "operator", Port: 22},
 				Mode:       test.mode,
 				Platform:   platformSessionState{ControlPath: filepath.Join(t.TempDir(), "control")},
 			}
 			output := make(map[outputStream]string)
-			status, err := executeSession(session, test.command, test.timeout, func(stream outputStream, data []byte) error {
+			started := time.Now()
+			status, err := executeSession(session, test.command, test.timeout, test.readyDelay, func(stream outputStream, data []byte) error {
 				if test.emitErr != nil {
 					return test.emitErr
 				}
 				output[stream] += string(data)
 				return nil
 			})
+			if test.wantBefore > 0 && time.Since(started) >= test.wantBefore {
+				t.Fatalf("executeSession() did not stop the ready delay")
+			}
 			if !errors.Is(err, test.wantErr) {
 				t.Fatalf("executeSession() error = %v, want %v", err, test.wantErr)
 			}
@@ -148,6 +167,7 @@ func installFakeSSH(t *testing.T) {
 case " $* " in
 *" -O check "*) exit 0 ;;
 *" exec-result "*) printf 'server\n'; printf 'warning\n' >&2; exit 7 ;;
+*" startup-failure "*) IFS= read -r _; printf 'startup failed\n' >&2; exit 255 ;;
 *" timeout "*) sleep 5 ;;
 *" output-timeout "*) printf x; sleep 5 ;;
 *) cat ;;

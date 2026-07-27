@@ -91,8 +91,8 @@ profile 等价于执行 `ssh myserver`，HostName、User、Port、IdentityFile�
 ### `run`
 
 ```sh
-ssh-handoff run [--stream] [--timeout DURATION] <session-id> '<command>'
-ssh-handoff run [--stream] [--timeout DURATION] <session-id> - < script.sh
+ssh-handoff run [--stream] [--timeout DURATION] [--shell-ready-delay DURATION] <session-id> '<command>'
+ssh-handoff run [--stream] [--timeout DURATION] [--shell-ready-delay DURATION] <session-id> - < script.sh
 ```
 
 `run` 通过已认证 transport 新建 channel，同步执行一条非交互命令。默认超时为一分钟：
@@ -100,6 +100,8 @@ ssh-handoff run [--stream] [--timeout DURATION] <session-id> - < script.sh
 ```sh
 ssh-handoff run --timeout 2m A3B4 'kubectl get nodes -o wide'
 ```
+
+`--shell-ready-delay` 只作用于 `shell-pty` session，默认为 1 秒。新建命令 channel 后，ssh-handoff 先发送一个回车，等待远端 Shell 就绪，再发送工作命令和 `exit`；设为 `0` 可以取消等待。该等待不会缩短 `--timeout` 指定的命令执行时间，SSH 子进程提前退出时也会立即结束。
 
 命令参数为 `-` 时，ssh-handoff 从本地标准输入读取完整命令文本，适合执行包含多层引号或多行内容的脚本：
 
@@ -183,7 +185,7 @@ PTY（pseudo-terminal，伪终端）让远端程序以连接到终端的方式�
 
 ### `shell-pty` session
 
-使用 `open --mode shell-pty` 创建此类 session。它的命令 channel 请求 PTY 并启动远端 Shell，再向 Shell 输入预先给定的工作命令和 `exit`。这个 Shell 用于适配远端入口；ssh-handoff 不会在执行期间继续转发用户输入，因此工作命令仍须能够一次性、非交互地完成。需要持续输入、菜单操作或全屏终端的程序应在原始 Shell 中运行。
+使用 `open --mode shell-pty` 创建此类 session。它的命令 channel 请求 PTY 并启动远端 Shell，发送一个回车并等待 Shell 就绪，再输入预先给定的工作命令和 `exit`。这个 Shell 用于适配远端入口；ssh-handoff 不会在执行期间继续转发用户输入，因此工作命令仍须能够一次性、非交互地完成。需要持续输入、菜单操作或全屏终端的程序应在原始 Shell 中运行。
 
 ## 输出
 
