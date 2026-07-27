@@ -10,11 +10,11 @@ import (
 	"testing"
 )
 
-func TestWindowsPTYRunsConsoleProcess(t *testing.T) {
+func TestWindowsPTYRunsConsoleProcessInUTF8(t *testing.T) {
 	path := cmp.Or(os.Getenv("ComSpec"), `C:\Windows\System32\cmd.exe`)
 	terminal, err := startWindowsPTY(
 		path,
-		[]string{"/d", "/c", "echo __SSH_HANDOFF_CONPTY__"},
+		[]string{"/d", "/c", "chcp & echo __SSH_HANDOFF_CONPTY__"},
 		80,
 		24,
 	)
@@ -44,8 +44,9 @@ func TestWindowsPTYRunsConsoleProcess(t *testing.T) {
 	if err := <-failures; err != nil {
 		t.Fatal(err)
 	}
-	if got := string(<-output); !strings.Contains(got, "__SSH_HANDOFF_CONPTY__") {
-		t.Fatalf("ConPTY output is missing marker: %q", got)
+	got := string(<-output)
+	if !strings.Contains(got, "65001") || !strings.Contains(got, "__SSH_HANDOFF_CONPTY__") {
+		t.Fatalf("ConPTY output does not confirm UTF-8 execution: %q", got)
 	}
 }
 

@@ -3,6 +3,7 @@
 package main
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"os"
@@ -90,6 +91,23 @@ func startWindowsPTY(path string, arguments []string, width, height int) (*windo
 	); err != nil {
 		return nil, fmt.Errorf("attach ConPTY process attribute: %w", err)
 	}
+	startup := windows.StartupInfoEx{
+		StartupInfo: windows.StartupInfo{
+			Cb: uint32(unsafe.Sizeof(windows.StartupInfoEx{})),
+			// Explicitly clear inherited console handles. Without this flag,
+			// console children launched under a console host or debugger can
+			// bypass ConPTY for their ordinary stdout and stderr.
+			Flags: windows.STARTF_USESTDHANDLES,
+		},
+		ProcThreadAttributeList: attributes.List(),
+	}
+	if err := runWindowsPTYProcess(
+		&startup.StartupInfo,
+		cmp.Or(os.Getenv("ComSpec"), `C:\Windows\System32\cmd.exe`),
+		[]string{"/d", "/q", "/s", "/c", "chcp 65001 >nul"},
+	); err != nil {
+		return nil, fmt.Errorf("configure ConPTY UTF-8: %w", err)
+	}
 
 	job, err := createWindowsPTYJob()
 	if err != nil {
@@ -102,44 +120,13 @@ func startWindowsPTY(path string, arguments []string, width, height int) (*windo
 		}
 	}()
 
-	commandLine, err := windows.UTF16PtrFromString(
-		windows.ComposeCommandLine(append([]string{path}, arguments...)),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("build Plink command line: %w", err)
-	}
-	application, err := windows.UTF16PtrFromString(path)
-	if err != nil {
-		return nil, fmt.Errorf("build Plink application path: %w", err)
-	}
-	startup := windows.StartupInfoEx{
-		StartupInfo: windows.StartupInfo{
-			Cb: uint32(unsafe.Sizeof(windows.StartupInfoEx{})),
-			// Explicitly clear inherited console handles. Without this flag,
-			// console children launched under a console host or debugger can
-			// bypass ConPTY for their ordinary stdout and stderr.
-			Flags: windows.STARTF_USESTDHANDLES,
-		},
-		ProcThreadAttributeList: attributes.List(),
-	}
-	var process windows.ProcessInformation
-	flags := uint32(
-		windows.EXTENDED_STARTUPINFO_PRESENT |
-			windows.CREATE_UNICODE_ENVIRONMENT |
-			windows.CREATE_SUSPENDED,
-	)
-	if err := windows.CreateProcess(
-		application,
-		commandLine,
-		nil,
-		nil,
-		false,
-		flags,
-		nil,
-		nil,
+	process, err := startWindowsPTYProcess(
 		&startup.StartupInfo,
-		&process,
-	); err != nil {
+		path,
+		arguments,
+		windows.CREATE_SUSPENDED,
+	)
+	if err != nil {
 		return nil, fmt.Errorf("start Plink in ConPTY: %w", err)
 	}
 	processOpen := true
@@ -185,6 +172,67 @@ func startWindowsPTY(path string, arguments []string, width, height int) (*windo
 	processOpen = false
 	jobOpen = false
 	return terminal, nil
+}
+
+func startWindowsPTYProcess(
+	startup *windows.StartupInfo,
+	path string,
+	arguments []string,
+	flags uint32,
+) (windows.ProcessInformation, error) {
+	commandLine, err := windows.UTF16PtrFromString(
+		windows.ComposeCommandLine(append([]string{path}, arguments...)),
+	)
+	if err != nil {
+		return windows.ProcessInformation{}, err
+	}
+	application, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return windows.ProcessInformation{}, err
+	}
+	var process windows.ProcessInformation
+	err = windows.CreateProcess(
+		application,
+		commandLine,
+		nil,
+		nil,
+		false,
+		windows.EXTENDED_STARTUPINFO_PRESENT|windows.CREATE_UNICODE_ENVIRONMENT|flags,
+		nil,
+		nil,
+		startup,
+		&process,
+	)
+	return process, err
+}
+
+func runWindowsPTYProcess(
+	startup *windows.StartupInfo,
+	path string,
+	arguments []string,
+) error {
+	process, err := startWindowsPTYProcess(startup, path, arguments, 0)
+	if err != nil {
+		return err
+	}
+	defer windows.CloseHandle(process.Process) //nolint:errcheck // cleanup after a completed bootstrap
+	defer windows.CloseHandle(process.Thread)  //nolint:errcheck // cleanup after a completed bootstrap
+
+	result, err := windows.WaitForSingleObject(process.Process, windows.INFINITE)
+	if err != nil {
+		return err
+	}
+	if result != windows.WAIT_OBJECT_0 {
+		return fmt.Errorf("wait returned status %d", result)
+	}
+	var exitCode uint32
+	if err := windows.GetExitCodeProcess(process.Process, &exitCode); err != nil {
+		return err
+	}
+	if exitCode != 0 {
+		return fmt.Errorf("process exited with code %d", exitCode)
+	}
+	return nil
 }
 
 func createWindowsPTYJob() (windows.Handle, error) {
