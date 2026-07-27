@@ -16,14 +16,15 @@ func TestHandoffControllerSerializesInputAndKeepalive(t *testing.T) {
 	if !changed || controller.managed {
 		t.Fatalf("two handoffs should return to interactive state: changed=%v managed=%v", changed, controller.managed)
 	}
-	if want := "whoami\n:\n:\npwd\n"; remote.String() != want {
-		t.Fatalf("remote input = %q, want %q", remote.String(), want)
+	initialWant := "whoami\n" + noopCommand + noopCommand + "pwd\n"
+	if got := remote.String(); got != initialWant {
+		t.Fatalf("remote input = %q, want %q", got, initialWant)
 	}
 
 	if err := controller.keepalive(); err != nil {
 		t.Fatal(err)
 	}
-	if remote.String() != "whoami\n:\n:\npwd\n" {
+	if remote.String() != initialWant {
 		t.Fatal("interactive state must not write keepalive input")
 	}
 
@@ -36,7 +37,7 @@ func TestHandoffControllerSerializesInputAndKeepalive(t *testing.T) {
 	if err := controller.keepalive(); err != nil {
 		t.Fatal(err)
 	}
-	if want := "whoami\n:\n:\npwd\n:\n:\n"; remote.String() != want {
+	if want := initialWant + noopCommand + noopCommand; remote.String() != want {
 		t.Fatalf("managed input = %q, want %q", remote.String(), want)
 	}
 

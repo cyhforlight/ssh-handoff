@@ -14,6 +14,8 @@ import (
 	"golang.org/x/term"
 )
 
+const noopCommand = ":\r"
+
 type windowsProcessResult struct {
 	exitCode int
 	err      error

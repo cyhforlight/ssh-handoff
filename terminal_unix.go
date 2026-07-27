@@ -14,6 +14,8 @@ import (
 	"golang.org/x/term"
 )
 
+const noopCommand = ":\n"
+
 func serveOpenSession(_ *sessionRegistry, session *session, stdin *os.File, stdout, stderr io.Writer) int {
 	if !term.IsTerminal(int(stdin.Fd())) {
 		writeText(stderr, "ssh-handoff open: stdin must be a terminal\n")

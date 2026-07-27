@@ -10,7 +10,6 @@ import (
 const (
 	keepaliveInterval = 10 * time.Minute
 	handoffByte       = byte(0x1d) // Ctrl-]
-	noopCommand       = ":\n"
 )
 
 type handoffController struct {
