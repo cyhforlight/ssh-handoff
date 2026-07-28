@@ -197,7 +197,6 @@ func TestWritePlinkCommandFilePreservesScript(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = os.Remove(path) })
 
 	data, err := os.ReadFile(path)
 	if err != nil {
