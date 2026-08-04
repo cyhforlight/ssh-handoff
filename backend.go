@@ -11,6 +11,8 @@ import (
 
 const childIOWaitDelay = 100 * time.Millisecond
 
+const timeoutWarning = "Command timed out locally. The remote command may still be running and holding an SSH session channel. Leaving it running reduces the shared connection's available session capacity; repeated timeouts may prevent new commands from starting. Check the remote state and terminate the process if appropriate before retrying."
+
 func executeSession(
 	session *session,
 	remoteCommand string,
@@ -93,6 +95,7 @@ func executeSession(
 	}
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		status.TimedOut = true
+		status.Warning = timeoutWarning
 		return status, nil
 	}
 	exitCode := 0

@@ -88,6 +88,31 @@ func TestBufferedRunOutputKeepsResultShape(t *testing.T) {
 	}
 }
 
+func TestBufferedRunOutputDescribesTimeout(t *testing.T) {
+	var buffer bytes.Buffer
+	output := newRunOutput(&buffer, false)
+	if err := output.writeResult(runStatus{
+		Session:  "A3B4",
+		Mode:     modeExec,
+		TimedOut: true,
+		Warning:  timeoutWarning,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	want := "{\n" +
+		"  \"session\": \"A3B4\",\n" +
+		"  \"mode\": \"exec\",\n" +
+		"  \"exit_code\": null,\n" +
+		"  \"timed_out\": true,\n" +
+		"  \"warning\": \"" + timeoutWarning + "\",\n" +
+		"  \"stdout\": \"\",\n" +
+		"  \"stderr\": \"\"\n" +
+		"}\n"
+	if got := buffer.String(); got != want {
+		t.Fatalf("buffered timeout output = %q, want %q", got, want)
+	}
+}
+
 func TestBufferedRunOutputReportsWriteFailure(t *testing.T) {
 	writeErr := errors.New("write failed")
 	output := newRunOutput(errorWriter{err: writeErr}, false)

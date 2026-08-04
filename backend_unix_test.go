@@ -89,6 +89,7 @@ func TestExecuteSession(t *testing.T) {
 		wantOutput  map[outputStream]string
 		wantExit    int
 		wantTimeout bool
+		wantWarning string
 		wantErr     error
 	}{
 		{
@@ -118,7 +119,15 @@ func TestExecuteSession(t *testing.T) {
 			wantOutput: map[outputStream]string{streamOutput: "startup failed\n"},
 			wantExit:   255,
 		},
-		{name: "timeout", mode: modeExec, command: "timeout", timeout: 20 * time.Millisecond, wantExit: -1, wantTimeout: true},
+		{
+			name:        "timeout",
+			mode:        modeExec,
+			command:     "timeout",
+			timeout:     20 * time.Millisecond,
+			wantExit:    -1,
+			wantTimeout: true,
+			wantWarning: timeoutWarning,
+		},
 		{name: "output error wins over timeout", mode: modeExec, command: "output-timeout", timeout: 20 * time.Millisecond, emitErr: outputErr, wantErr: outputErr},
 	}
 
@@ -153,7 +162,8 @@ func TestExecuteSession(t *testing.T) {
 				exitCode = *status.ExitCode
 			}
 			if status.Session != session.ID || status.Mode != test.mode ||
-				exitCode != test.wantExit || status.TimedOut != test.wantTimeout {
+				exitCode != test.wantExit || status.TimedOut != test.wantTimeout ||
+				status.Warning != test.wantWarning {
 				t.Fatalf("executeSession() status = %#v", status)
 			}
 			if !maps.Equal(output, test.wantOutput) {

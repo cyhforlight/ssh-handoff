@@ -25,6 +25,7 @@ type runStatus struct {
 	Mode     executionMode `json:"mode"`
 	ExitCode *int          `json:"exit_code"`
 	TimedOut bool          `json:"timed_out"`
+	Warning  string        `json:"warning,omitzero"`
 }
 
 type commandError struct {

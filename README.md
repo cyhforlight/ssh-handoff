@@ -212,6 +212,20 @@ PTY（pseudo-terminal，伪终端）让远端程序以连接到终端的方式�
 
 `exit_code` 正常情况下等于远端工作命令的退出状态；SSH 客户端自身发生错误时通常为 255。
 
+本地 timeout 无法证明远端命令已经结束，因此结果会增加可操作的 `warning`。例如：
+
+```json
+{
+  "session": "A3B4",
+  "mode": "exec",
+  "stdout": "partial output\n",
+  "stderr": "",
+  "exit_code": null,
+  "timed_out": true,
+  "warning": "Command timed out locally. The remote command may still be running and holding an SSH session channel. Leaving it running reduces the shared connection's available session capacity; repeated timeouts may prevent new commands from starting. Check the remote state and terminate the process if appropriate before retrying."
+}
+```
+
 #### `shell-pty`
 
 `shell-pty` session 成功执行后的结果使用单一的 `output` 字段：
@@ -239,7 +253,7 @@ PTY（pseudo-terminal，伪终端）让远端程序以连接到终端的方式�
 }
 ```
 
-错误代码包括 `invalid_arguments`、`session_not_found`、`session_unavailable`、`execution_error` 和 `local_error`。`run` 超时时返回 `timed_out: true`，ssh-handoff 进程以状态码 124 退出。
+错误代码包括 `invalid_arguments`、`session_not_found`、`session_unavailable`、`execution_error` 和 `local_error`。`run` 超时时返回 `timed_out: true` 和一条远端状态提示，ssh-handoff 进程以状态码 124 退出。
 
 ### `list`
 
