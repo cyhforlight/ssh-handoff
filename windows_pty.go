@@ -17,11 +17,12 @@ type windowsPTY struct {
 	Input  *os.File
 	Output *os.File
 
-	console   windows.Handle
-	process   windows.Handle
-	job       windows.Handle
-	pid       int
-	consoleMu sync.Mutex
+	console      windows.Handle
+	process      windows.Handle
+	job          windows.Handle
+	pid          int
+	creationTime uint64
+	consoleMu    sync.Mutex
 }
 
 func startWindowsPTY(path string, arguments []string, width, height int) (*windowsPTY, error) {
@@ -129,6 +130,10 @@ func startWindowsPTY(path string, arguments []string, width, height int) (*windo
 	if err != nil {
 		return nil, fmt.Errorf("start Plink in ConPTY: %w", err)
 	}
+	creationTime, err := processCreationTime(process.Process)
+	if err != nil {
+		return nil, fmt.Errorf("read Plink process identity: %w", err)
+	}
 	processOpen := true
 	threadOpen := true
 	defer func() {
@@ -159,12 +164,13 @@ func startWindowsPTY(path string, arguments []string, width, height int) (*windo
 	outputWriteOpen = false
 
 	terminal := &windowsPTY{
-		Input:   os.NewFile(uintptr(inputWrite), "conpty-input"),
-		Output:  os.NewFile(uintptr(outputRead), "conpty-output"),
-		console: console,
-		process: process.Process,
-		job:     job,
-		pid:     int(process.ProcessId),
+		Input:        os.NewFile(uintptr(inputWrite), "conpty-input"),
+		Output:       os.NewFile(uintptr(outputRead), "conpty-output"),
+		console:      console,
+		process:      process.Process,
+		job:          job,
+		pid:          int(process.ProcessId),
+		creationTime: creationTime,
 	}
 	inputWriteOpen = false
 	outputReadOpen = false
@@ -260,6 +266,10 @@ func terminalDimension(value int) int16 {
 
 func (terminal *windowsPTY) PID() int {
 	return terminal.pid
+}
+
+func (terminal *windowsPTY) CreationTime() uint64 {
+	return terminal.creationTime
 }
 
 func (terminal *windowsPTY) Resize(width, height int) error {

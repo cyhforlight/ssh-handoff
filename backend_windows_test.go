@@ -22,6 +22,13 @@ func TestWindowsRejectsOpenSSHProfile(t *testing.T) {
 	}
 }
 
+func TestCloseSessionRequiresPlinkProcessIdentity(t *testing.T) {
+	err := closeSession(&session{ID: "ABCD"})
+	if err == nil || !strings.Contains(err.Error(), "process identity is unavailable") {
+		t.Fatalf("closeSession() error = %v", err)
+	}
+}
+
 func TestPlinkProfilesSeparateUpstreamAndDownstream(t *testing.T) {
 	id := fmt.Sprintf("TEST%d", os.Getpid())
 	removePlinkProfiles(id)

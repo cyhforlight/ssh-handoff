@@ -22,6 +22,9 @@ func TestWindowsPTYRunsConsoleProcessInUTF8(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer terminal.Close()
+	if terminal.CreationTime() == 0 {
+		t.Fatal("Plink process creation time was not recorded")
+	}
 	if err := terminal.Resize(100, 30); err != nil {
 		t.Fatalf("resize ConPTY: %v", err)
 	}

@@ -88,6 +88,7 @@ func serveOpenSession(
 	}
 	defer terminal.Close()
 	session.Platform.PlinkPID = terminal.PID()
+	session.Platform.PlinkCreationTime = terminal.CreationTime()
 
 	outputDone := make(chan struct{})
 	go func() {

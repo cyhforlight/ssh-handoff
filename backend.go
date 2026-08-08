@@ -17,7 +17,6 @@ func executeSession(
 	session *session,
 	remoteCommand string,
 	timeout time.Duration,
-	shellReadyDelay time.Duration,
 	emit outputSink,
 ) (runStatus, error) {
 	if strings.TrimSpace(remoteCommand) == "" {
@@ -31,9 +30,6 @@ func executeSession(
 	}
 
 	status := runStatus{Session: session.ID, Mode: session.Mode}
-	if session.Mode == modeShellPTY {
-		timeout += shellReadyDelay
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
@@ -56,31 +52,14 @@ func executeSession(
 		}
 		err = cmd.Start()
 		if err == nil {
-			processDone := make(chan error, 1)
-			go func() { processDone <- cmd.Wait() }()
-			timer := time.NewTimer(shellReadyDelay)
-			select {
-			case err = <-processDone:
-				timer.Stop()
-			case <-ctx.Done():
-				timer.Stop()
-				err = <-processDone
-			case <-timer.C:
-				_, inputErr = io.WriteString(
-					input,
-					strings.TrimRight(remoteCommand, "\n")+"\nexit\n",
-				)
-				if inputErr == nil {
-					select {
-					case err = <-processDone:
-					case <-ctx.Done():
-						err = <-processDone
-					}
-				} else {
-					_ = input.Close()
-					err = <-processDone
-				}
+			_, inputErr = io.WriteString(
+				input,
+				strings.TrimRight(remoteCommand, "\n")+"\nexit\n",
+			)
+			if inputErr != nil {
+				_ = input.Close()
 			}
+			err = cmd.Wait()
 		}
 		_ = input.Close()
 	} else {

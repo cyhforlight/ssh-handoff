@@ -9,8 +9,10 @@ import (
 	"io"
 	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -83,8 +85,6 @@ func TestExecuteSession(t *testing.T) {
 		host        string
 		command     string
 		timeout     time.Duration
-		readyDelay  time.Duration
-		wantBefore  time.Duration
 		emitErr     error
 		wantOutput  map[outputStream]string
 		wantExit    int
@@ -114,8 +114,6 @@ func TestExecuteSession(t *testing.T) {
 			host:       "startup-failure",
 			command:    "ignored",
 			timeout:    time.Second,
-			readyDelay: 2 * time.Second,
-			wantBefore: 2 * time.Second,
 			wantOutput: map[outputStream]string{streamOutput: "startup failed\n"},
 			wantExit:   255,
 		},
@@ -140,17 +138,13 @@ func TestExecuteSession(t *testing.T) {
 				Platform:   platformSessionState{ControlPath: filepath.Join(t.TempDir(), "control")},
 			}
 			output := make(map[outputStream]string)
-			started := time.Now()
-			status, err := executeSession(session, test.command, test.timeout, test.readyDelay, func(stream outputStream, data []byte) error {
+			status, err := executeSession(session, test.command, test.timeout, func(stream outputStream, data []byte) error {
 				if test.emitErr != nil {
 					return test.emitErr
 				}
 				output[stream] += string(data)
 				return nil
 			})
-			if test.wantBefore > 0 && time.Since(started) >= test.wantBefore {
-				t.Fatalf("executeSession() did not stop the ready delay")
-			}
 			if !errors.Is(err, test.wantErr) {
 				t.Fatalf("executeSession() error = %v, want %v", err, test.wantErr)
 			}
@@ -179,6 +173,8 @@ func installFakeSSH(t *testing.T) {
 	script := `#!/bin/sh
 case " $* " in
 *" -O check "*) exit 0 ;;
+*" -O exit "*" close-failure "*) printf 'control exit failed\n' >&2; exit 255 ;;
+*" -O exit "*) exit 0 ;;
 *" exec-result "*) printf 'server\n'; printf 'warning\n' >&2; exit 7 ;;
 *" startup-failure "*) printf 'startup failed\n' >&2; exit 255 ;;
 *" timeout "*) sleep 5 ;;
@@ -190,6 +186,36 @@ esac
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
+}
+
+func TestCloseSessionUsesOnlyControlSocket(t *testing.T) {
+	installFakeSSH(t)
+	wrapper := exec.Command("sleep", "30")
+	if err := wrapper.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = wrapper.Process.Kill()
+		_ = wrapper.Wait()
+	})
+
+	session := &session{
+		ID:         "ABCD",
+		PID:        wrapper.Process.Pid,
+		Connection: connectionSpec{Host: "example.com", User: "operator", Port: 22},
+		Platform:   platformSessionState{ControlPath: filepath.Join(t.TempDir(), "control")},
+	}
+	if err := closeSession(session); err != nil {
+		t.Fatal(err)
+	}
+	if !processAlive(wrapper.Process.Pid) {
+		t.Fatal("closeSession() terminated the session wrapper")
+	}
+
+	session.Connection.Host = "close-failure"
+	if err := closeSession(session); err == nil || !strings.Contains(err.Error(), "control exit failed") {
+		t.Fatalf("closeSession() error = %v", err)
+	}
 }
 
 func TestSSHCommandContextBoundsInheritedOutput(t *testing.T) {

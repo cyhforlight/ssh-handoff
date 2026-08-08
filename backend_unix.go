@@ -5,7 +5,6 @@ package main
 import (
 	"cmp"
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -102,21 +101,12 @@ func checkSession(session *session) error {
 }
 
 func closeSession(session *session) error {
-	_, _ = runControlCommand(session, "exit")
-
-	if processAlive(session.PID) {
-		if err := unix.Kill(session.PID, unix.SIGTERM); err != nil && !errors.Is(err, unix.ESRCH) {
-			return err
-		}
+	output, err := runControlCommand(session, "exit")
+	if err == nil {
+		return nil
 	}
-	deadline := time.Now().Add(3 * time.Second)
-	for processAlive(session.PID) {
-		if time.Now().After(deadline) {
-			return fmt.Errorf("session %s did not close", session.ID)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	return nil
+	message := cmp.Or(strings.TrimSpace(string(output)), err.Error())
+	return fmt.Errorf("session %s did not close: %s", session.ID, message)
 }
 
 func terminateProcess(process *os.Process) {

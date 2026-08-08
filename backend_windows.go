@@ -387,19 +387,17 @@ func checkSession(session *session) error {
 }
 
 func closeSession(session *session) error {
-	if session.Platform.PlinkPID > 0 {
-		if err := terminatePID(session.Platform.PlinkPID); err != nil {
-			return fmt.Errorf("close Plink master: %w", err)
-		}
+	if session.Platform.PlinkPID <= 0 || session.Platform.PlinkCreationTime == 0 {
+		return fmt.Errorf(
+			"session %s cannot be safely closed: Plink process identity is unavailable",
+			session.ID,
+		)
 	}
-	if waitForProcessExit(session.PID, 3*time.Second) {
-		return nil
-	}
-	if err := terminatePID(session.PID); err != nil {
-		return err
-	}
-	if !waitForProcessExit(session.PID, time.Second) {
-		return fmt.Errorf("session %s did not close", session.ID)
+	if err := terminatePlinkProcess(
+		session.Platform.PlinkPID,
+		session.Platform.PlinkCreationTime,
+	); err != nil {
+		return fmt.Errorf("close Plink master: %w", err)
 	}
 	return nil
 }
