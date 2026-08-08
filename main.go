@@ -16,6 +16,7 @@ const defaultTimeout = time.Minute
 const (
 	openUsage  = "ssh-handoff open --host HOST --user USER [--port PORT] [--identity FILE] [--mode exec|shell-pty] [--note NOTE]\n  ssh-handoff open --profile NAME [--mode exec|shell-pty] [--note NOTE]"
 	runUsage   = "ssh-handoff run [--stream] [--timeout DURATION] <session-id> <command|->"
+	copyUsage  = "ssh-handoff copy upload <session-id> <local-path> <remote-path>\n  ssh-handoff copy download <session-id> <remote-path> <local-path>"
 	listUsage  = "ssh-handoff list"
 	closeUsage = "ssh-handoff close <session-id>"
 )
@@ -40,7 +41,7 @@ func main() {
 
 func runCLI(args []string, stdin *os.File, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		writeText(stderr, "usage: ssh-handoff <open|run|list|close> ...\n")
+		writeText(stderr, "usage: ssh-handoff <open|run|copy|list|close> ...\n")
 		return 2
 	}
 	if len(args) == 1 && isHelpFlag(args[0]) {
@@ -57,6 +58,8 @@ func runCLI(args []string, stdin *os.File, stdout, stderr io.Writer) int {
 		return openCommand(registry, args[1:], stdin, stdout, stderr)
 	case "run":
 		return runCommand(registry, args[1:], stdin, stdout)
+	case "copy":
+		return copyCommand(registry, args[1:], stdout, stderr)
 	case "list":
 		return listCommand(registry, args[1:], stdout, stderr)
 	case "close":
@@ -258,12 +261,14 @@ func helpText(command string) (string, bool) {
 用法:
   ` + openUsage + `
   ` + runUsage + `
+  ` + copyUsage + `
   ` + listUsage + `
   ` + closeUsage + `
 
 命令:
   open   建立连接并保持原始 Shell
   run    通过指定 session 执行一条命令
+  copy   通过 exec session 上传或下载单个文件
   list   列出仍然存活的 session
   close  关闭指定 session
 
@@ -299,6 +304,8 @@ func helpText(command string) (string, bool) {
 session ID 输入不区分大小写。执行模式由 open 时的 --mode 决定。
 命令参数为 - 时，从本地标准输入读取完整命令文本。
 `, true
+	case "copy":
+		return copyUsage + "\n", true
 	case "list":
 		return `列出仍然存活的 session。
 

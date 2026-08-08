@@ -2,7 +2,7 @@
 
 用户在终端中建立的 SSH 连接由其中运行的 `ssh` 进程持有，Agent 无法直接使用。Agent 的每次命令调用都会启动独立进程，因此即使用户已经登录，Agent 也没有可复用的远端执行入口。
 
-ssh-handoff 将用户建立的 SSH 连接保存为本地可发现、可复用的 session。Agent 通过 session ID 复用同一条已认证 SSH transport，并为每条命令创建独立 channel；用户同时持有原始 Shell。
+ssh-handoff 将用户建立的 SSH 连接保存为本地可发现、可复用的 session。Agent 通过 session ID 复用同一条已认证 SSH transport，并为命令执行或文件传输创建独立 channel；用户同时持有原始 Shell。
 
 ssh-handoff 支持 Linux、macOS、WSL 和原生 Windows。Linux、macOS 与 WSL 使用系统 OpenSSH 的 `ControlMaster`；Windows 使用 Plink connection sharing，并通过 ConPTY 保留完整的交互终端。
 
@@ -84,7 +84,7 @@ profile 等价于执行 `ssh myserver`，HostName、User、Port、IdentityFile�
 
 原生 Windows 使用 Plink，不支持 OpenSSH profile、PuTTY saved session 或 OpenSSH-to-PuTTY 配置转换。Windows 上的 `--identity` 应指向 Plink 能够读取的私钥文件；Unix 上则应使用 OpenSSH 能够读取的格式。主机指纹、密码、MFA、ssh-agent、Pageant 和密钥认证均由底层客户端在原始终端中处理。
 
-`open` 不提供 IPv4/IPv6、compression、任意 `-o` 或 extra args。复杂的 Unix OpenSSH 配置应放入 profile。端口转发和文件传输以后可分别作为 `forward`、`copy` 操作加入，不属于连接建立参数。
+`open` 不提供 IPv4/IPv6、compression、任意 `-o` 或 extra args。复杂的 Unix OpenSSH 配置应放入 profile。文件传输由连接建立后的 `copy` 操作提供，不扩张 `open` 的连接参数。
 
 一个 `open` 进程对应一个 session。关闭该进程或终端会结束 session。
 
@@ -141,6 +141,24 @@ ssh-handoff run --stream --timeout 10m A3B4 'docker compose pull'
 
 默认模式在命令结束后输出单个 JSON 结果，适合只关心最终状态的短命令。
 
+### `copy`
+
+```sh
+ssh-handoff copy upload <session-id> <local-path> <remote-path>
+ssh-handoff copy download <session-id> <remote-path> <local-path>
+```
+
+`copy` 通过 `exec` session 的独立 command channel 传输单个普通文件。上传把本地文件作为远端命令的原始 stdin，下载把远端命令的原始 stdout 写入本地文件，因此文本和二进制内容都不会经过 JSON、UTF-8 或换行转换：
+
+```sh
+ssh-handoff copy upload A3B4 ./app.tar /tmp/app.tar
+ssh-handoff copy download A3B4 /var/log/app.log ./app.log
+```
+
+本地和远端目标都先写入同目录的临时文件，传输命令成功后再替换正式路径。远端需要 POSIX Shell 以及 `cat`、`mv`、`rm`；下载还要求 exec channel 的 stdout 只包含命令输出。远端路径按字面值处理，可以是绝对路径或相对于远端初始目录的相对路径；不展开 `~`、环境变量或通配符。
+
+首个版本不支持 `shell-pty` session、目录、文件属性、符号链接本身、进度、断点续传和校验和。源路径指向符号链接时，传输其目标文件的内容。
+
 ### `list`
 
 ```sh
@@ -168,10 +186,11 @@ ssh-handoff close A3B4
 ```text
 已认证的 SSH transport（OpenSSH ControlMaster / Plink upstream）
 ├── 原始 Shell channel：人工操作、托管切换和定时保活
-└── 命令 channel：每次 run 单独新建
+├── 命令 channel：每次 run 单独新建
+└── 文件 channel：每次 copy 单独新建 exec channel
 ```
 
-`run` 的命令和输出不会进入原始终端，托管状态只作用于原始 Shell channel。每次 `run` 都是一次完整、同步、非交互的命令执行，各次调用通过独立 channel 彼此隔离，可以在同一 session 上并发；有先后依赖的操作应顺序发起。命令 channel 在调用结束后关闭，不继承原始 Shell 或上一次 `run` 的工作目录、环境变量和历史状态。新 channel 的初始目录、环境和 Shell 初始化由远端 SSH 服务决定；需要共享状态的多个步骤应组合在同一个命令字符串中，并显式包含所需的 `cd` 和环境变量。
+`run` 和 `copy` 的数据不会进入原始终端，托管状态只作用于原始 Shell channel。每次操作都新建独立 channel，可以在同一 session 上并发；有先后依赖的操作应顺序发起。channel 在调用结束后关闭，不继承原始 Shell 或上一次操作的工作目录、环境变量和历史状态。新 channel 的初始目录、环境和 Shell 初始化由远端 SSH 服务决定；需要共享状态的多个步骤应组合在同一个命令字符串中，并显式包含所需的 `cd` 和环境变量。
 
 session 属于创建它的本地系统用户。Agent 需要以同一用户运行，并能访问相同的 runtime 目录及 OpenSSH control socket 或 PuTTY connection-sharing 命名管道；未共享这些路径的容器、其他 Windows 安全令牌、WSL 实例或隔离环境无法发现该 session。
 
@@ -255,6 +274,16 @@ PTY（pseudo-terminal，伪终端）让远端程序以连接到终端的方式�
 
 错误代码包括 `invalid_arguments`、`session_not_found`、`session_unavailable`、`execution_error` 和 `local_error`。`run` 超时时返回 `timed_out: true` 和一条远端状态提示，ssh-handoff 进程以状态码 124 退出。
 
+### `copy`
+
+成功上传或下载后输出一行确认文本：
+
+```text
+copied upload via A3B4
+```
+
+失败信息写入 stderr，并以非零状态退出。传输失败时不会替换已有目标文件。
+
 ### `list`
 
 `list` 成功时输出表格，例如：
@@ -285,6 +314,7 @@ closed A3B4
 请使用本机的 ssh-handoff 操作我已经认证的 SSH session <SESSION_ID>。
 
 - 使用 `ssh-handoff run [--timeout DURATION] <SESSION_ID> '<command>'` 执行普通命令；长时间运行的命令加 `--stream` 实时接收 NDJSON；复杂或多行命令可通过 `ssh-handoff run <SESSION_ID> - < SCRIPT` 从本地标准输入读取。
+- 使用 `ssh-handoff copy upload <SESSION_ID> <LOCAL> <REMOTE>` 上传单个文件，使用 `ssh-handoff copy download <SESSION_ID> <REMOTE> <LOCAL>` 下载单个文件；copy 只支持 exec session。
 - 如果没有给出 session ID，先运行 `ssh-handoff list`，根据 ID、连接信息和备注识别；无法确定时询问我。
 - 命令应包含所需的 `cd`、环境变量和完整参数，并能够非交互执行。
 - 需要提权时使用 `sudo -n`，权限失败时告诉我。

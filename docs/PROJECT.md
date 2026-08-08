@@ -34,15 +34,18 @@ Agent 从另一个进程调用：
 ssh-handoff run <session-id> '<command>'
 ssh-handoff run --stream <session-id> '<long-running-command>'
 ssh-handoff run <session-id> - < script.sh
+ssh-handoff copy upload <session-id> <local-path> <remote-path>
+ssh-handoff copy download <session-id> <remote-path> <local-path>
 ```
 
 命令参数为 `-` 时，工具从本地标准输入读取完整命令文本，再按同样的非交互语义执行；标准输入不转发给远端程序。
 
-v1 CLI 只包含四个子命令：
+CLI 包含五个子命令：
 
 ```text
 open   人工认证并保持 session
 run    在指定 session 中同步执行一条命令
+copy   通过 exec session 上传或下载单个文件
 list   列出仍然存活的 session
 close  按 ID 关闭指定 session
 ```
@@ -58,7 +61,7 @@ close  按 ID 关闭指定 session
 一个 session 包含两个职责不同的部分：
 
 - **保活 Shell**：用户认证时进入的原始交互 Shell。进入托管状态后，工具定期向它写入空指令，避免 JumpServer 一类服务因原始会话长时间无操作而断开；v1 的固定间隔为 10 分钟；
-- **执行 channel**：Agent 每次调用 `run` 时，通过同一条已认证 transport 新建的 channel。工作命令不会写入保活 Shell，也不依赖其中的 `cwd`、环境变量或历史状态。
+- **执行 channel**：Agent 每次调用 `run` 或 `copy` 时，通过同一条已认证 transport 新建的 channel。工作命令和文件字节流不会写入保活 Shell，也不依赖其中的 `cwd`、环境变量或历史状态。
 
 连接托管与命令执行是两个独立维度。无论使用哪种执行模式，原始 Shell 都只承担认证、人工接管和保活；Agent 始终使用新建的执行 channel。
 
@@ -70,6 +73,8 @@ close  按 ID 关闭指定 session
 - `shell-pty`：复用同一条 transport，新建带 PTY 的 Shell channel，面向拒绝标准 `exec`、只允许交互式会话的堡垒机或设备。
 
 两种模式都逐次新建 channel，因此 `run` 之间不保留隐式 Shell 状态，但可获得的输出语义不同。Agent 面向行式、非交互的 Linux/POSIX Shell 命令；密码询问、确认菜单、全屏程序和交互式 `sudo` 仍由用户处理。单次命令同步执行，各次 `run` 通过独立 channel 彼此隔离，可以在同一 session 上并发；有先后依赖的操作应顺序发起。`exec` 可以提供独立的 stdout、stderr 和可靠的远端退出状态；`shell-pty` 采用简单的临时 Shell 语义：写入工作命令和 `exit`，等待 SSH 子进程结束，返回混合输出、本地 SSH 进程退出码和超时状态，不包装命令或使用完成标记，也不承诺该退出码等于工作命令的真实远端退出码。
+
+`copy` 只使用 `exec` session。上传把本地普通文件连接到远端 `cat` 的 stdin；下载把远端 `cat` 的 stdout 写入本地临时文件。两端都在传输命令成功后替换目标路径。文件内容始终作为原始字节流处理，远端假定为 POSIX Shell，下载假定 stdout 没有额外内容；首个版本不承担目录递归、元数据保留、进度、断点续传或内容校验和。
 
 ## 技术方向
 
@@ -85,10 +90,10 @@ Windows 上 Plink sharing identity 由用户、逻辑 host 与端口决定，因
 
 ## v1 范围
 
-当前版本要完成的是：用户通过平台支持的 SSH 登录命令人工建立连接，工具托管并定期保活原始 Shell，Agent 随后通过新建的 `exec` 或 `shell-pty` channel 同步执行非交互命令，并能在 Linux、macOS、WSL 与原生 Windows 上列出和关闭多个显式 session。
+当前版本要完成的是：用户通过平台支持的 SSH 登录命令人工建立连接，工具托管并定期保活原始 Shell，Agent 随后通过新建的 `exec` 或 `shell-pty` channel 同步执行非交互命令，通过 `exec` channel 传输单个文件，并能在 Linux、macOS、WSL 与原生 Windows 上列出和关闭多个显式 session。
 
-当前范围仍不计划加入 MCP 适配、文件传输、凭据管理、异步任务、自动重连与重放、策略审计平台，以及 Agent 对多轮交互程序的自动化。Windows adapter 只正规化历史 `ssh-manager` 已验证的 Plink 路线，不额外实现 Windows OpenSSH ControlMaster 或完整的 OpenSSH-to-PuTTY 配置翻译层。
+当前范围仍不计划加入 MCP 适配、目录传输、断点续传、凭据管理、异步任务、自动重连与重放、策略审计平台，以及 Agent 对多轮交互程序的自动化。Windows adapter 只正规化历史 `ssh-manager` 已验证的 Plink 路线，不额外实现 Windows OpenSSH ControlMaster 或完整的 OpenSSH-to-PuTTY 配置翻译层。
 
-`open` 不提供地址族选择、compression、任意 SSH 选项或 extra args。端口转发与文件传输若由实际需求推动，应分别作为连接建立后的 `forward` 和 `copy` 操作设计，不扩张 `open` 的连接接口。
+`open` 不提供地址族选择、compression、任意 SSH 选项或 extra args。文件传输作为连接建立后的 `copy` 操作存在，不扩张 `open` 的连接接口；端口转发若由实际需求推动，也应保持为独立操作。
 
 范围判断以旧 `ssh-manager` 为现实基线：它没有提供的能力不会因为“一个完整工具似乎应该具备”就自然进入 v1。新能力应由实际使用阻力推动。

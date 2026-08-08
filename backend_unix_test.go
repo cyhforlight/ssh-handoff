@@ -179,6 +179,8 @@ case " $* " in
 *" startup-failure "*) printf 'startup failed\n' >&2; exit 255 ;;
 *" timeout "*) sleep 5 ;;
 *" output-timeout "*) printf x; sleep 5 ;;
+*"ssh-handoff-copy-test"*) for command do :; done; exec sh -c "$command" ;;
+*"ssh-handoff-copy-failure"*) printf partial; printf 'copy failed\n' >&2; exit 9 ;;
 *) while IFS= read -r line; do eval "$line"; done ;;
 esac
 `

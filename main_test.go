@@ -15,6 +15,7 @@ func TestHelp(t *testing.T) {
 		{name: "root flag", args: []string{"--help"}, want: "ssh-handoff open"},
 		{name: "subcommand long flag", args: []string{"run", "--help"}, want: runUsage},
 		{name: "subcommand flag", args: []string{"open", "-h"}, want: openUsage},
+		{name: "copy help", args: []string{"copy", "--help"}, want: copyUsage},
 	}
 
 	for _, test := range tests {
