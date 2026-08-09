@@ -36,16 +36,18 @@ ssh-handoff run --stream <session-id> '<long-running-command>'
 ssh-handoff run <session-id> - < script.sh
 ssh-handoff copy upload <session-id> <local-path> <remote-path>
 ssh-handoff copy download <session-id> <remote-path> <local-path>
+ssh-handoff source <output.zip>
 ```
 
 命令参数为 `-` 时，工具从本地标准输入读取完整命令文本，再按同样的非交互语义执行；标准输入不转发给远端程序。
 
-CLI 包含五个子命令：
+CLI 包含六个子命令：
 
 ```text
 open   人工认证并保持 session
 run    在指定 session 中同步执行一条命令
 copy   通过 exec session 上传或下载单个文件
+source 导出编译进可执行文件的项目源码
 list   列出仍然存活的 session
 close  按 ID 关闭指定 session
 ```
@@ -90,7 +92,7 @@ Windows 上 Plink sharing identity 由用户、逻辑 host 与端口决定，因
 
 ## v1 范围
 
-当前版本要完成的是：用户通过平台支持的 SSH 登录命令人工建立连接，工具托管并定期保活原始 Shell，Agent 随后通过新建的 `exec` 或 `shell-pty` channel 同步执行非交互命令，通过 `exec` channel 传输单个文件，并能在 Linux、macOS、WSL 与原生 Windows 上列出和关闭多个显式 session。
+当前版本要完成的是：用户通过平台支持的 SSH 登录命令人工建立连接，工具托管并定期保活原始 Shell，Agent 随后通过新建的 `exec` 或 `shell-pty` channel 同步执行非交互命令，通过 `exec` channel 传输单个文件，并能在 Linux、macOS、WSL 与原生 Windows 上列出和关闭多个显式 session。当前可执行文件同时内嵌项目源码，并可通过 `source` 导出，供 Agent 离线检查实际运行版本。
 
 当前范围仍不计划加入 MCP 适配、目录传输、断点续传、凭据管理、异步任务、自动重连与重放、策略审计平台，以及 Agent 对多轮交互程序的自动化。Windows adapter 只正规化历史 `ssh-manager` 已验证的 Plink 路线，不额外实现 Windows OpenSSH ControlMaster 或完整的 OpenSSH-to-PuTTY 配置翻译层。
 

@@ -159,6 +159,14 @@ ssh-handoff copy download A3B4 /var/log/app.log ./app.log
 
 首个版本不支持 `shell-pty` session、目录、文件属性、符号链接本身、进度、断点续传和校验和。源路径指向符号链接时，传输其目标文件的内容。
 
+### `source`
+
+```sh
+ssh-handoff source ./ssh-handoff-source.zip
+```
+
+`source` 把编译进当前可执行文件的项目源码导出为 ZIP，供 Agent 在没有仓库或网络时检查实际运行版本的实现。归档包含 Go 源码、测试、模块文件、README、LICENSE 和 `docs/PROJECT.md`；目标文件已存在时拒绝覆盖。
+
 ### `list`
 
 ```sh
@@ -315,6 +323,7 @@ closed A3B4
 
 - 使用 `ssh-handoff run [--timeout DURATION] <SESSION_ID> '<command>'` 执行普通命令；长时间运行的命令加 `--stream` 实时接收 NDJSON；复杂或多行命令可通过 `ssh-handoff run <SESSION_ID> - < SCRIPT` 从本地标准输入读取。
 - 使用 `ssh-handoff copy upload <SESSION_ID> <LOCAL> <REMOTE>` 上传单个文件，使用 `ssh-handoff copy download <SESSION_ID> <REMOTE> <LOCAL>` 下载单个文件；copy 只支持 exec session。
+- 需要了解当前可执行文件的实现且本地没有仓库或网络时，使用 `ssh-handoff source <TEMP.zip>` 导出内嵌源码，检查后删除归档。
 - 如果没有给出 session ID，先运行 `ssh-handoff list`，根据 ID、连接信息和备注识别；无法确定时询问我。
 - 命令应包含所需的 `cd`、环境变量和完整参数，并能够非交互执行。
 - 需要提权时使用 `sudo -n`，权限失败时告诉我。

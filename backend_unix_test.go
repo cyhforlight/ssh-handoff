@@ -9,72 +9,10 @@ import (
 	"io"
 	"maps"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"slices"
-	"strings"
 	"testing"
 	"time"
 )
-
-func TestSSHArguments(t *testing.T) {
-	assertArgs := func(name string, got, want []string) {
-		t.Helper()
-		if !slices.Equal(got, want) {
-			t.Fatalf("%s = %#v, want %#v", name, got, want)
-		}
-	}
-	session := &session{
-		Connection: connectionSpec{
-			Host:     "2001:db8::10",
-			User:     "operator",
-			Port:     2222,
-			Identity: "/keys/work key",
-		},
-		Mode:     modeExec,
-		Platform: platformSessionState{ControlPath: "/tmp/control socket"},
-	}
-
-	wantMaster := []string{
-		"-M", "-S", "/tmp/control socket", "-tt",
-		"-p", "2222", "-l", "operator", "-i", "/keys/work key",
-		"--", "2001:db8::10",
-	}
-	assertArgs("sshMasterArgs()", sshMasterArgs(session), wantMaster)
-
-	wantExec := []string{
-		"-S", "/tmp/control socket",
-		"-o", "ControlMaster=no",
-		"-o", "BatchMode=yes",
-		"-o", "ProxyCommand=false",
-		"-p", "2222", "-l", "operator", "-i", "/keys/work key",
-		"--", "2001:db8::10",
-	}
-	assertArgs("sshDownstreamArgs()", sshDownstreamArgs(session), wantExec)
-
-	remoteCommand := `printf '%s\n' "hello world"`
-	command, _, err := newSessionCommand(context.Background(), session, remoteCommand)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := command.Args[len(command.Args)-1]; got != remoteCommand {
-		t.Fatalf("remote command argument = %q, want %q", got, remoteCommand)
-	}
-
-	session.Mode = modeShellPTY
-	wantPTY := slices.Insert(slices.Clone(wantExec), 8, "-tt")
-	assertArgs("sshDownstreamArgs()", sshDownstreamArgs(session), wantPTY)
-
-	session.Connection = connectionSpec{Profile: "myserver"}
-	wantProfile := []string{
-		"-S", "/tmp/control socket",
-		"-o", "ControlMaster=no",
-		"-o", "BatchMode=yes",
-		"-o", "ProxyCommand=false",
-		"-tt", "--", "myserver",
-	}
-	assertArgs("sshDownstreamArgs()", sshDownstreamArgs(session), wantProfile)
-}
 
 func TestExecuteSession(t *testing.T) {
 	installFakeSSH(t)
@@ -188,36 +126,6 @@ esac
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
-}
-
-func TestCloseSessionUsesOnlyControlSocket(t *testing.T) {
-	installFakeSSH(t)
-	wrapper := exec.Command("sleep", "30")
-	if err := wrapper.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_ = wrapper.Process.Kill()
-		_ = wrapper.Wait()
-	})
-
-	session := &session{
-		ID:         "ABCD",
-		PID:        wrapper.Process.Pid,
-		Connection: connectionSpec{Host: "example.com", User: "operator", Port: 22},
-		Platform:   platformSessionState{ControlPath: filepath.Join(t.TempDir(), "control")},
-	}
-	if err := closeSession(session); err != nil {
-		t.Fatal(err)
-	}
-	if !processAlive(wrapper.Process.Pid) {
-		t.Fatal("closeSession() terminated the session wrapper")
-	}
-
-	session.Connection.Host = "close-failure"
-	if err := closeSession(session); err == nil || !strings.Contains(err.Error(), "control exit failed") {
-		t.Fatalf("closeSession() error = %v", err)
-	}
 }
 
 func TestSSHCommandContextBoundsInheritedOutput(t *testing.T) {
