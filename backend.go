@@ -11,7 +11,7 @@ import (
 
 const childIOWaitDelay = 100 * time.Millisecond
 
-const timeoutWarning = "Command timed out locally. The remote command may still be running and holding an SSH session channel. Leaving it running reduces the shared connection's available session capacity; repeated timeouts may prevent new commands from starting. Check the remote state and terminate the process if appropriate before retrying."
+const timeoutWarning = "Command timed out locally. Do not retry yet. Actively inspect the remote host for the process or process tree started by this command. If confidently identified, terminate it and verify that it has exited so the SSH session slot can be released. If no new channel can be opened, ask the user to clean it up from the original shell or reconnect. Do not terminate unrelated or ambiguous processes."
 
 func executeSession(
 	session *session,
