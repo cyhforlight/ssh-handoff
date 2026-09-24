@@ -96,6 +96,7 @@ func downloadFile(session *session, remotePath, localPath string, stderr io.Writ
 	return os.Rename(temporaryPath, localPath)
 }
 
+// os/exec special-cases *os.File by passing the fd directly to the child, bypassing Go's I/O layer and hiding local errors; wrapping forces a goroutine pipe.
 type readerOnly struct{ io.Reader }
 type writerOnly struct{ io.Writer }
 
