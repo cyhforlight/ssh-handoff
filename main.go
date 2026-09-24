@@ -12,7 +12,6 @@ import (
 )
 
 const defaultTimeout = time.Minute
-const sourceUsage = "ssh-handoff source <output.zip>"
 
 const (
 	openUsage  = "ssh-handoff open --host HOST --user USER [--port PORT] [--identity FILE] [--mode exec|shell-pty] [--note NOTE]\n  ssh-handoff open --profile NAME [--mode exec|shell-pty] [--note NOTE]"
@@ -42,7 +41,7 @@ func main() {
 
 func runCLI(args []string, stdin *os.File, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		writeText(stderr, "usage: ssh-handoff <open|run|copy|source|list|close> ...\n")
+		writeText(stderr, "usage: ssh-handoff <open|run|copy|list|close> ...\n")
 		return 2
 	}
 	if len(args) == 1 && isHelpFlag(args[0]) {
@@ -61,8 +60,6 @@ func runCLI(args []string, stdin *os.File, stdout, stderr io.Writer) int {
 		return runCommand(registry, args[1:], stdin, stdout)
 	case "copy":
 		return copyCommand(registry, args[1:], stdout, stderr)
-	case "source":
-		return sourceCommand(args[1:], stdout, stderr)
 	case "list":
 		return listCommand(registry, args[1:], stdout, stderr)
 	case "close":
@@ -265,7 +262,6 @@ func helpText(command string) (string, bool) {
   ` + openUsage + `
   ` + runUsage + `
   ` + copyUsage + `
-  ` + sourceUsage + `
   ` + listUsage + `
   ` + closeUsage + `
 
@@ -273,10 +269,10 @@ func helpText(command string) (string, bool) {
   open   建立连接并保持原始 Shell
   run    通过指定 session 执行一条命令
   copy   通过 exec session 上传或下载单个文件
-  source 导出当前可执行文件内嵌的源码
   list   列出仍然存活的 session
   close  关闭指定 session
 
+源码: https://github.com/cyhforlight/ssh-handoff
 使用 "ssh-handoff <command> --help" 查看子命令帮助。
 `, true
 	case "open":
@@ -311,14 +307,6 @@ session ID 输入不区分大小写。执行模式由 open 时的 --mode 决定�
 `, true
 	case "copy":
 		return copyUsage + "\n", true
-	case "source":
-		return `导出编译进当前可执行文件的完整项目源码。
-
-用法:
-  ` + sourceUsage + `
-
-结果为 ZIP 文件；目标文件已存在时拒绝覆盖。
-`, true
 	case "list":
 		return `列出仍然存活的 session。
 
