@@ -138,6 +138,7 @@ func serveOpenSession(
 	lastWidth, lastHeight := width, height
 
 	controller := handoffController{remote: terminal.Input}
+	defer controller.stop()
 
 	for {
 		select {

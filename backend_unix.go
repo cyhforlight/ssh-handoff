@@ -76,6 +76,9 @@ func sshDownstreamArgs(session *session) []string {
 	arguments := append(sshSessionArgs(session),
 		"-o", "ControlMaster=no",
 		"-o", "BatchMode=yes",
+		// ProxyCommand=false and RemoteCommand=none prevent the session file
+		// from redirecting this downstream through an unintended jump host or
+		// running a startup command as if it were the remote command.
 		"-o", "ProxyCommand=false",
 		"-o", "RemoteCommand=none",
 	)
