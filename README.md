@@ -1,10 +1,8 @@
 # ssh-handoff
 
-用户在终端中建立的 SSH 连接由其中运行的 `ssh` 进程持有，Agent 无法直接使用。Agent 的每次命令调用都会启动独立进程，因此即使用户已经登录，Agent 也没有可复用的远端执行入口。
+ssh-handoff 将用户在终端中建立的 SSH 连接暴露为可复用的本地 session。Agent 通过 session ID 在同一条已认证 transport 上新建 channel 执行命令或传输文件；用户同时持有原始 Shell，连接生命周期由 `open` 进程管理。
 
-ssh-handoff 将用户建立的 SSH 连接保存为本地可发现、可复用的 session。Agent 通过 session ID 复用同一条已认证 SSH transport，并为命令执行或文件传输创建独立 channel；用户同时持有原始 Shell。
-
-ssh-handoff 支持 Linux、macOS、WSL 和原生 Windows。Linux、macOS 与 WSL 使用系统 OpenSSH 的 `ControlMaster`；Windows 使用 Plink connection sharing，并通过 ConPTY 保留完整的交互终端。
+支持 Linux、macOS、WSL 和原生 Windows。Unix 平台使用系统 OpenSSH 的 ControlMaster；Windows 使用 Plink connection sharing，通过 ConPTY 保留完整的交互终端。
 
 ## 安装
 
@@ -82,10 +80,6 @@ ssh-handoff open --profile jump-alias --mode shell-pty --note '生产环境'
 
 profile 等价于执行 `ssh myserver`，HostName、User、Port、IdentityFile、ProxyJump 等配置继续由 OpenSSH 从 `~/.ssh/config` 原生读取。profile 与 direct 参数完全互斥。
 
-profile 的 `RemoteCommand` 用于 `open` 的原始连接；`run` 和 `copy` 的独立 channel 会清除它，使用各自的命令或 Shell 请求。
-
-OpenSSH 调用的 `ControlPersist`、`ForkAfterAuthentication` 和 `StdinNull` 固定为 `no`，使连接与命令进程由 ssh-handoff 持有，并由它管理交互输入、命令文本和文件数据。
-
 原生 Windows 使用 Plink，不支持 OpenSSH profile、PuTTY saved session 或 OpenSSH-to-PuTTY 配置转换。Windows 上的 `--identity` 应指向 Plink 能够读取的私钥文件；Unix 上则应使用 OpenSSH 能够读取的格式。主机指纹、密码、MFA、ssh-agent、Pageant 和密钥认证均由底层客户端在原始终端中处理。
 
 `open` 不提供 IPv4/IPv6、compression、任意 `-o` 或 extra args。复杂的 Unix OpenSSH 配置应放入 profile。文件传输由连接建立后的 `copy` 操作提供，不扩张 `open` 的连接参数。
@@ -119,7 +113,7 @@ ssh-handoff run A3B4 - < deploy.sh
 Get-Content -Raw -Encoding utf8 .\deploy.sh | .\ssh-handoff.exe run A3B4 -
 ```
 
-标准输入只用于提供命令文本；读取完成后，命令仍作为一次非交互执行发送，不会继续向远端程序转发输入。stdin 文本中的 CRLF 会规范化为 LF，以便 Windows 文本管道和脚本能够交给远端 POSIX Shell；单独的 CR 不会被改写。
+标准输入只用于提供命令文本；读取完成后，命令仍作为一次非交互执行发送，不会继续向远端程序转发输入。
 
 需要提权的命令应使用非交互模式：
 
@@ -161,9 +155,7 @@ ssh-handoff copy download A3B4 /var/log/app.log ./app.log
 
 本地和远端目标都先写入同目录的临时文件。上传确认本地读取和临时文件传输均成功后，再通过一个独立 command channel 提交远端文件；下载确认本地写入和传输成功后替换本地目标。这样本地读写失败不会发布不完整文件。上传异常中断或共享连接丢失时，可能留下 `.ssh-handoff-` 临时文件。
 
-远端需要 POSIX Shell 以及 `cat`、`mv`、`rm`；下载还要求 exec channel 的 stdout 只包含命令输出。远端路径按字面值处理，可以是绝对路径或相对于远端初始目录的相对路径；不展开 `~`、环境变量或通配符。
-
-首个版本不支持 `shell-pty` session、目录、文件属性、符号链接本身、进度、断点续传和校验和。源路径指向符号链接时，传输其目标文件的内容。
+远端需要 POSIX Shell 以及 `cat`、`mv`、`rm`；下载还要求 exec channel 的 stdout 只包含命令输出。远端路径按字面值处理，可以是绝对路径或相对于远端初始目录的相对路径；不展开 `~`、环境变量或通配符。不支持目录、文件属性、进度和断点续传；源路径指向符号链接时传输其目标文件的内容。
 
 ### `list`
 
@@ -200,7 +192,7 @@ ssh-handoff close A3B4
 
 session 属于创建它的本地系统用户。Agent 需要以同一用户运行，并能访问相同的 runtime 目录及 OpenSSH control socket 或 PuTTY connection-sharing 命名管道；未共享这些路径的容器、其他 Windows 安全令牌、WSL 实例或隔离环境无法发现该 session。
 
-PTY（pseudo-terminal，伪终端）让远端程序以连接到终端的方式运行，因此输出中可能包含输入回显、Shell prompt 和控制字符。原始 Shell channel 使用 PTY，以保留用户操作终端所需的交互能力。部分堡垒机或设备入口拒绝标准 SSH `exec` 请求，只接受带 PTY 的 Shell channel；`shell-pty` session 用于兼容这类入口。
+PTY（伪终端）让远端程序以连接到终端的方式运行，输出中可能包含输入回显、Shell prompt 和控制字符。原始 Shell channel 使用 PTY，以保留用户操作终端所需的交互能力。部分堡垒机或设备入口拒绝标准 SSH `exec` 请求，只接受带 PTY 的 Shell channel；`shell-pty` session 用于兼容这类入口。
 
 `open --mode` 创建下面两类 session 之一，并固定该 session 后续命令 channel 的类型；`run` 没有 mode 参数。
 
@@ -237,19 +229,7 @@ PTY（pseudo-terminal，伪终端）让远端程序以连接到终端的方式�
 
 `exit_code` 正常情况下等于远端工作命令的退出状态；SSH 客户端自身发生错误时通常为 255。
 
-本地 timeout 无法证明远端命令已经结束，因此结果会增加可操作的 `warning`。例如：
-
-```json
-{
-  "session": "A3B4",
-  "mode": "exec",
-  "stdout": "partial output\n",
-  "stderr": "",
-  "exit_code": null,
-  "timed_out": true,
-  "warning": "Command timed out locally. Do not retry yet. Actively inspect the remote host for the process or process tree started by this command. If confidently identified, terminate it and verify that it has exited so the SSH session slot can be released. If no new channel can be opened, ask the user to clean it up from the original shell or reconnect. Do not terminate unrelated or ambiguous processes."
-}
-```
+本地 timeout 无法证明远端命令已经结束，因此超时时结果会增加 `warning` 字段，提示先检查远端进程状态再决定是否重试。
 
 #### `shell-pty`
 
