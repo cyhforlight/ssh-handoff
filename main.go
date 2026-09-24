@@ -27,14 +27,6 @@ type openOptions struct {
 	Mode       executionMode
 }
 
-type sessionUnavailableError struct {
-	message string
-}
-
-func (err *sessionUnavailableError) Error() string {
-	return err.message
-}
-
 func main() {
 	os.Exit(runCLI(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
 }

@@ -35,6 +35,16 @@ type sessionRegistry struct {
 
 var errSessionNotFound = errors.New("session not found")
 
+// sessionUnavailableError signals that the session exists but its underlying
+// SSH transport is no longer reachable.
+type sessionUnavailableError struct {
+	message string
+}
+
+func (err *sessionUnavailableError) Error() string {
+	return err.message
+}
+
 func parseMode(value string) (executionMode, error) {
 	mode := executionMode(value)
 	if mode != modeExec && mode != modeShellPTY {

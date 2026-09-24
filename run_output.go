@@ -169,8 +169,8 @@ func (output *ndjsonOutput) flush() error {
 		}); err != nil {
 			return err
 		}
-		delete(output.carry, stream)
 	}
+	clear(output.carry)
 	return nil
 }
 
