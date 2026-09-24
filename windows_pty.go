@@ -33,44 +33,26 @@ func startWindowsPTY(path string, arguments []string, width, height int) (*windo
 	if err := windows.CreatePipe(&inputRead, &inputWrite, nil, 0); err != nil {
 		return nil, fmt.Errorf("create ConPTY input pipe: %w", err)
 	}
-	inputReadOpen := true
-	inputWriteOpen := true
-	defer func() {
-		if inputReadOpen {
-			_ = windows.CloseHandle(inputRead)
-		}
-		if inputWriteOpen {
-			_ = windows.CloseHandle(inputWrite)
-		}
-	}()
+	defer closeWindowsHandle(&inputRead)
+	defer closeWindowsHandle(&inputWrite)
 
 	var outputRead windows.Handle
 	var outputWrite windows.Handle
 	if err := windows.CreatePipe(&outputRead, &outputWrite, nil, 0); err != nil {
 		return nil, fmt.Errorf("create ConPTY output pipe: %w", err)
 	}
-	outputReadOpen := true
-	outputWriteOpen := true
-	defer func() {
-		if outputReadOpen {
-			_ = windows.CloseHandle(outputRead)
-		}
-		if outputWriteOpen {
-			_ = windows.CloseHandle(outputWrite)
-		}
-	}()
+	defer closeWindowsHandle(&outputRead)
+	defer closeWindowsHandle(&outputWrite)
 
 	var console windows.Handle
 	if err := windows.CreatePseudoConsole(size, inputRead, outputWrite, 0, &console); err != nil {
 		return nil, fmt.Errorf("create ConPTY: %w", err)
 	}
-	consoleOpen := true
 	defer func() {
-		if consoleOpen {
-			if outputReadOpen {
-				_ = windows.CloseHandle(outputRead)
-				outputReadOpen = false
-			}
+		if console != 0 {
+			// Construction failed before an output reader could drain ConPTY.
+			// Disconnect it before closing the console so shutdown cannot block.
+			closeWindowsHandle(&outputRead)
 			windows.ClosePseudoConsole(console)
 		}
 	}()
@@ -114,12 +96,7 @@ func startWindowsPTY(path string, arguments []string, width, height int) (*windo
 	if err != nil {
 		return nil, err
 	}
-	jobOpen := true
-	defer func() {
-		if jobOpen {
-			_ = windows.CloseHandle(job)
-		}
-	}()
+	defer closeWindowsHandle(&job)
 
 	process, err := startWindowsPTYProcess(
 		&startup.StartupInfo,
@@ -130,22 +107,18 @@ func startWindowsPTY(path string, arguments []string, width, height int) (*windo
 	if err != nil {
 		return nil, fmt.Errorf("start Plink in ConPTY: %w", err)
 	}
+	defer func() {
+		if process.Process != 0 {
+			_ = windows.TerminateProcess(process.Process, 1)
+			_, _ = windows.WaitForSingleObject(process.Process, 1000)
+			closeWindowsHandle(&process.Process)
+		}
+		closeWindowsHandle(&process.Thread)
+	}()
 	creationTime, err := processCreationTime(process.Process)
 	if err != nil {
 		return nil, fmt.Errorf("read Plink process identity: %w", err)
 	}
-	processOpen := true
-	threadOpen := true
-	defer func() {
-		if processOpen {
-			_ = windows.TerminateProcess(process.Process, 1)
-			_, _ = windows.WaitForSingleObject(process.Process, 1000)
-			_ = windows.CloseHandle(process.Process)
-		}
-		if threadOpen {
-			_ = windows.CloseHandle(process.Thread)
-		}
-	}()
 
 	if err := windows.AssignProcessToJobObject(job, process.Process); err != nil {
 		return nil, fmt.Errorf("assign Plink to cleanup job: %w", err)
@@ -153,15 +126,12 @@ func startWindowsPTY(path string, arguments []string, width, height int) (*windo
 	if _, err := windows.ResumeThread(process.Thread); err != nil {
 		return nil, fmt.Errorf("resume Plink process: %w", err)
 	}
-	_ = windows.CloseHandle(process.Thread)
-	threadOpen = false
+	closeWindowsHandle(&process.Thread)
 
 	// ConPTY owns its copies after CreateProcess. Closing ours lets pipe users
 	// observe EOF when the pseudoconsole shuts down.
-	_ = windows.CloseHandle(inputRead)
-	inputReadOpen = false
-	_ = windows.CloseHandle(outputWrite)
-	outputWriteOpen = false
+	closeWindowsHandle(&inputRead)
+	closeWindowsHandle(&outputWrite)
 
 	terminal := &windowsPTY{
 		Input:        os.NewFile(uintptr(inputWrite), "conpty-input"),
@@ -172,12 +142,16 @@ func startWindowsPTY(path string, arguments []string, width, height int) (*windo
 		pid:          int(process.ProcessId),
 		creationTime: creationTime,
 	}
-	inputWriteOpen = false
-	outputReadOpen = false
-	consoleOpen = false
-	processOpen = false
-	jobOpen = false
+	// The returned terminal now owns these handles.
+	inputWrite, outputRead, console, process.Process, job = 0, 0, 0, 0, 0
 	return terminal, nil
+}
+
+func closeWindowsHandle(handle *windows.Handle) {
+	if *handle != 0 {
+		_ = windows.CloseHandle(*handle)
+		*handle = 0
+	}
 }
 
 func startWindowsPTYProcess(
@@ -313,14 +287,8 @@ func (terminal *windowsPTY) Close() {
 	if terminal.Output != nil {
 		_ = terminal.Output.Close()
 	}
-	if terminal.process != 0 {
-		_ = windows.CloseHandle(terminal.process)
-		terminal.process = 0
-	}
-	if terminal.job != 0 {
-		_ = windows.CloseHandle(terminal.job)
-		terminal.job = 0
-	}
+	closeWindowsHandle(&terminal.process)
+	closeWindowsHandle(&terminal.job)
 }
 
 func (terminal *windowsPTY) closeConsole() {

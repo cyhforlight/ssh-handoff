@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 func copyCommand(registry *sessionRegistry, args []string, stdout, stderr io.Writer) int {
@@ -37,18 +40,38 @@ func copyCommand(registry *sessionRegistry, args []string, stdout, stderr io.Wri
 	return 0
 }
 
-func uploadFile(session *session, localPath, remotePath string, stderr io.Writer) error {
+func uploadFile(session *session, localPath, remotePath string, stderr io.Writer) (err error) {
+	info, err := os.Stat(localPath)
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("upload source is not a regular file: %s", localPath)
+	}
 	source, err := os.Open(localPath)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = source.Close() }()
 
-	command := "dst=" + quotePOSIXShell(remotePath) +
-		`; tmp="${dst}.ssh-handoff-$$"` +
-		`; trap 'rm -f -- "$tmp"' 0 HUP INT TERM` +
-		`; [ ! -d "$dst" ] && cat > "$tmp" && mv -f -- "$tmp" "$dst"`
-	return runTransfer(session, command, source, io.Discard, stderr)
+	temporary := quotePOSIXShell(remotePath + ".ssh-handoff-" + rand.Text()[:12])
+	destination := quotePOSIXShell(remotePath)
+	defer func() {
+		if err != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = runTransfer(ctx, session, "rm -f -- "+temporary, nil, io.Discard, io.Discard)
+		}
+	}()
+
+	command := "[ ! -d " + destination + " ] && cat > " + temporary
+	if err := runTransfer(context.Background(), session, command, source, io.Discard, stderr); err != nil {
+		return err
+	}
+	// SSH can turn a local stdin read error into a normal remote EOF. Publish
+	// only after our local read and the staging command have both succeeded.
+	command = "[ ! -d " + destination + " ] && mv -f -- " + temporary + " " + destination
+	return runTransfer(context.Background(), session, command, nil, io.Discard, stderr)
 }
 
 func downloadFile(session *session, remotePath, localPath string, stderr io.Writer) error {
@@ -62,7 +85,9 @@ func downloadFile(session *session, remotePath, localPath string, stderr io.Writ
 		_ = os.Remove(temporaryPath)
 	}()
 
-	if err := runTransfer(session, "cat < "+quotePOSIXShell(remotePath), nil, temporary, stderr); err != nil {
+	source := quotePOSIXShell(remotePath)
+	command := "[ -f " + source + " ] && cat < " + source
+	if err := runTransfer(context.Background(), session, command, nil, temporary, stderr); err != nil {
 		return err
 	}
 	if err := temporary.Close(); err != nil {
@@ -71,15 +96,23 @@ func downloadFile(session *session, remotePath, localPath string, stderr io.Writ
 	return os.Rename(temporaryPath, localPath)
 }
 
-func runTransfer(session *session, command string, stdin io.Reader, stdout, stderr io.Writer) error {
-	cmd, cleanup, err := newSessionCommand(context.Background(), session, command)
+type readerOnly struct{ io.Reader }
+type writerOnly struct{ io.Writer }
+
+func runTransfer(ctx context.Context, session *session, command string, stdin io.Reader, stdout, stderr io.Writer) error {
+	cmd, cleanup, err := newSessionCommand(ctx, session, command)
 	if err != nil {
 		return err
 	}
 	if cleanup != nil {
 		defer cleanup()
 	}
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stderr
+	// Keep file I/O in Go: passing *os.File directly lets the SSH client hide
+	// read/write failures behind the remote command's successful exit status.
+	if stdin != nil {
+		cmd.Stdin = readerOnly{stdin}
+	}
+	cmd.Stdout, cmd.Stderr = writerOnly{stdout}, writerOnly{stderr}
 	return cmd.Run()
 }
 

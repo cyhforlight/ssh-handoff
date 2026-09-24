@@ -18,6 +18,8 @@ const (
 	modeShellPTY executionMode = "shell-pty"
 )
 
+const sessionIDAlphabet = "ABCDEFGHJKMNPRSTUVWXYZ2345689"
+
 type session struct {
 	ID         string               `json:"id"`
 	Connection connectionSpec       `json:"connection"`
@@ -61,10 +63,17 @@ func (registry *sessionRegistry) create(
 	}
 	var created *session
 	err := withRegistryLock(registry.dir, func() error {
-		sessions, err := registry.list()
+		sessions, err := registry.loadAll()
 		if err != nil {
 			return err
 		}
+		sessions = slices.DeleteFunc(sessions, func(session *session) bool {
+			if processAlive(session.PID) {
+				return false
+			}
+			registry.removeFiles(session.ID)
+			return true
+		})
 
 		id := newSessionID(sessions)
 		created = &session{
@@ -86,16 +95,24 @@ func (registry *sessionRegistry) update(session *session) error {
 
 func (registry *sessionRegistry) resolve(id string) (*session, error) {
 	id = strings.ToUpper(id)
-	sessions, err := registry.list()
+	notFound := fmt.Errorf("%w: %s", errSessionNotFound, id)
+	if !validSessionID(id) {
+		return nil, notFound
+	}
+	if err := validatePrivateDirectory(registry.dir); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, notFound
+		}
+		return nil, err
+	}
+	session, err := registry.load(id)
 	if err != nil {
 		return nil, err
 	}
-	for _, candidate := range sessions {
-		if candidate.ID == id {
-			return candidate, nil
-		}
+	if session == nil || !processAlive(session.PID) {
+		return nil, notFound
 	}
-	return nil, fmt.Errorf("%w: %s", errSessionNotFound, id)
+	return session, nil
 }
 
 func (registry *sessionRegistry) removeFiles(id string) {
@@ -140,23 +157,41 @@ func (registry *sessionRegistry) loadAll() ([]*session, error) {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
 		}
-		data, err := os.ReadFile(filepath.Join(registry.dir, entry.Name()))
+		id := strings.TrimSuffix(entry.Name(), ".json")
+		if !validSessionID(id) {
+			continue
+		}
+		session, err := registry.load(id)
 		if err != nil {
 			return nil, err
 		}
-		var session session
-		if err := json.Unmarshal(data, &session); err != nil {
-			continue
+		if session != nil {
+			sessions = append(sessions, session)
 		}
-		if err := session.Connection.validate(); err != nil {
-			continue
-		}
-		if err := validatePlatformConnection(session.Connection); err != nil {
-			continue
-		}
-		sessions = append(sessions, &session)
 	}
 	return sessions, nil
+}
+
+func (registry *sessionRegistry) load(id string) (*session, error) {
+	data, err := os.ReadFile(registry.statePath(id))
+	if errors.Is(err, os.ErrNotExist) {
+		// The owner may have exited after the directory was read.
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var session session
+	if err := json.Unmarshal(data, &session); err != nil || session.ID != id {
+		return nil, nil
+	}
+	if err := session.Connection.validate(); err != nil {
+		return nil, nil
+	}
+	if err := validatePlatformConnection(session.Connection); err != nil {
+		return nil, nil
+	}
+	return &session, nil
 }
 
 func (registry *sessionRegistry) list() ([]*session, error) {
@@ -164,28 +199,24 @@ func (registry *sessionRegistry) list() ([]*session, error) {
 	if err != nil {
 		return nil, err
 	}
-	live := sessions[:0]
-	for _, session := range sessions {
-		if processAlive(session.PID) {
-			live = append(live, session)
-		} else {
-			registry.removeFiles(session.ID)
-		}
-	}
-	return live, nil
+	return slices.DeleteFunc(sessions, func(session *session) bool {
+		return !processAlive(session.PID)
+	}), nil
 }
 
 func (registry *sessionRegistry) statePath(id string) string {
 	return filepath.Join(registry.dir, id+".json")
 }
 
-func newSessionID(sessions []*session) string {
-	const alphabet = "ABCDEFGHJKMNPRSTUVWXYZ2345689"
+func validSessionID(id string) bool {
+	return len(id) == 4 && strings.Trim(id, sessionIDAlphabet) == ""
+}
 
+func newSessionID(sessions []*session) string {
 	for {
 		var candidate [4]byte
 		for index := range candidate {
-			candidate[index] = alphabet[rand.N(len(alphabet))]
+			candidate[index] = sessionIDAlphabet[rand.N(len(sessionIDAlphabet))]
 		}
 		id := string(candidate[:])
 		if !slices.ContainsFunc(sessions, func(session *session) bool { return session.ID == id }) {

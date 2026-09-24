@@ -9,10 +9,93 @@ import (
 	"io"
 	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestSSHDownstreamOverridesLoginConfig(t *testing.T) {
+	ssh, err := exec.LookPath("ssh")
+	if err != nil {
+		t.Skip("OpenSSH client is not installed")
+	}
+	for _, test := range []struct {
+		mode       executionMode
+		configured string
+		want       string
+	}{
+		{modeExec, "force", "false"},
+		{modeShellPTY, "no", "force"},
+	} {
+		t.Run(string(test.mode), func(t *testing.T) {
+			config := filepath.Join(t.TempDir(), "ssh_config")
+			remoteCommand := "cd /workspace && exec sh -l"
+			configuration := "Host fixture\n  RequestTTY " + test.configured + "\n  RemoteCommand " + remoteCommand + "\n"
+			if err := os.WriteFile(config, []byte(configuration), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			session := &session{Connection: connectionSpec{Profile: "fixture"}, Mode: test.mode}
+			args := append([]string{"-G", "-F", config}, sshDownstreamArgs(session)...)
+			if test.mode == modeExec {
+				args = append(args, "printf test")
+			}
+			output, err := exec.Command(ssh, args...).CombinedOutput()
+			if err != nil {
+				t.Fatalf("ssh -G: %v\n%s", err, output)
+			}
+			if !strings.Contains(string(output), "\nrequesttty "+test.want+"\n") {
+				t.Fatalf("ssh -G did not select RequestTTY %s:\n%s", test.want, output)
+			}
+			if strings.Contains(string(output), "\nremotecommand ") {
+				t.Fatalf("ssh -G retained the login RemoteCommand:\n%s", output)
+			}
+			masterArgs := append([]string{"-G", "-F", config}, sshMasterArgs(session)...)
+			masterOutput, err := exec.Command(ssh, masterArgs...).CombinedOutput()
+			if err != nil {
+				t.Fatalf("master ssh -G: %v\n%s", err, masterOutput)
+			}
+			if !strings.Contains(string(masterOutput), "\nremotecommand "+remoteCommand+"\n") {
+				t.Fatalf("master ssh -G lost the login RemoteCommand:\n%s", masterOutput)
+			}
+		})
+	}
+}
+
+func TestSSHSessionCommandsStayForegroundInteractive(t *testing.T) {
+	ssh, err := exec.LookPath("ssh")
+	if err != nil {
+		t.Skip("OpenSSH client is not installed")
+	}
+	config := filepath.Join(t.TempDir(), "ssh_config")
+	configuration := "Host fixture\n  ControlPersist yes\n  ForkAfterAuthentication yes\n  StdinNull yes\n"
+	if err := os.WriteFile(config, []byte(configuration), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	session := &session{Connection: connectionSpec{Profile: "fixture"}, Mode: modeExec}
+	for _, test := range []struct {
+		name string
+		args []string
+	}{
+		{"master", sshMasterArgs(session)},
+		{"downstream", append(sshDownstreamArgs(session), "printf test")},
+		{"control", sshControlArgs(session, "check")},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			args := append([]string{"-G", "-F", config}, test.args...)
+			output, err := exec.Command(ssh, args...).CombinedOutput()
+			if err != nil {
+				t.Fatalf("ssh -G: %v\n%s", err, output)
+			}
+			for _, option := range []string{"controlpersist", "forkafterauthentication", "stdinnull"} {
+				if !strings.Contains(string(output), "\n"+option+" no\n") {
+					t.Fatalf("ssh -G did not disable %s:\n%s", option, output)
+				}
+			}
+		})
+	}
+}
 
 func TestExecuteSession(t *testing.T) {
 	installFakeSSH(t)

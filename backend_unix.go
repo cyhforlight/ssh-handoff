@@ -58,30 +58,40 @@ func newSessionCommand(
 	return sshCommandContext(ctx, arguments...), nil, nil
 }
 
+func sshSessionArgs(session *session) []string {
+	return []string{
+		"-S", session.Platform.ControlPath,
+		"-o", "ControlPersist=no",
+		"-o", "ForkAfterAuthentication=no",
+		"-o", "StdinNull=no",
+	}
+}
+
 func sshMasterArgs(session *session) []string {
-	arguments := []string{"-M", "-S", session.Platform.ControlPath, "-tt"}
+	arguments := append(sshSessionArgs(session), "-M", "-tt")
 	return append(arguments, sshTargetArgs(session.Connection)...)
 }
 
 func sshDownstreamArgs(session *session) []string {
-	arguments := []string{
-		"-S", session.Platform.ControlPath,
+	arguments := append(sshSessionArgs(session),
 		"-o", "ControlMaster=no",
 		"-o", "BatchMode=yes",
 		"-o", "ProxyCommand=false",
-	}
+		"-o", "RemoteCommand=none",
+	)
 	if session.Mode == modeShellPTY {
 		arguments = append(arguments, "-tt")
+	} else {
+		arguments = append(arguments, "-T")
 	}
 	return append(arguments, sshTargetArgs(session.Connection)...)
 }
 
 func sshControlArgs(session *session, operation string) []string {
-	arguments := []string{
-		"-S", session.Platform.ControlPath,
+	arguments := append(sshSessionArgs(session),
 		"-O", operation,
 		"-o", "BatchMode=yes",
-	}
+	)
 	return append(arguments, sshTargetArgs(session.Connection)...)
 }
 

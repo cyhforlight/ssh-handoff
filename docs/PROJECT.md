@@ -76,7 +76,7 @@ close  按 ID 关闭指定 session
 
 两种模式都逐次新建 channel，因此 `run` 之间不保留隐式 Shell 状态，但可获得的输出语义不同。Agent 面向行式、非交互的 Linux/POSIX Shell 命令；密码询问、确认菜单、全屏程序和交互式 `sudo` 仍由用户处理。单次命令同步执行，各次 `run` 通过独立 channel 彼此隔离，可以在同一 session 上并发；有先后依赖的操作应顺序发起。`exec` 可以提供独立的 stdout、stderr 和可靠的远端退出状态；`shell-pty` 采用简单的临时 Shell 语义：写入工作命令和 `exit`，等待 SSH 子进程结束，返回混合输出、本地 SSH 进程退出码和超时状态，不包装命令或使用完成标记，也不承诺该退出码等于工作命令的真实远端退出码。
 
-`copy` 只使用 `exec` session。上传把本地普通文件连接到远端 `cat` 的 stdin；下载把远端 `cat` 的 stdout 写入本地临时文件。两端都在传输命令成功后替换目标路径。文件内容始终作为原始字节流处理，远端假定为 POSIX Shell，下载假定 stdout 没有额外内容；首个版本不承担目录递归、元数据保留、进度、断点续传或内容校验和。
+`copy` 只使用 `exec` session。Go 持有本地文件的读取和写入，SSH 客户端负责传输；本地 I/O 失败与远端退出状态分别影响操作结果。上传先向远端临时文件发送普通文件的字节，确认读取和传输均成功后，再用独立 command channel 提交；下载把远端普通文件写入本地临时文件，写入和传输均成功后替换目标路径。上传失败时尽力删除本次临时文件，异常中断或连接丢失可能留下临时文件。内容始终作为原始字节流处理，远端假定为 POSIX Shell，下载假定 stdout 没有额外内容；首个版本不承担目录递归、元数据保留、进度、断点续传或内容校验和。
 
 ## 技术方向
 
@@ -89,6 +89,8 @@ Go 代码负责本地 session 生命周期、原始终端托管、定时保活�
 共享的 CLI、session registry、托管切换和输出语义不依赖具体平台，SSH 客户端与终端托管位于明确的平台 seam。每次 `run` 的命令校验、超时、输出绑定和终态归类属于共享执行流程；平台 adapter 只检查已有 transport 并准备一次 OpenSSH 或 Plink 客户端进程。Windows adapter 不是用 Plink 模拟 OpenSSH ControlMaster：它使用两个临时 PuTTY profile，把原始连接限制为 sharing upstream、把每次 `run` 限制为 sharing downstream，并在下游禁用独立认证。这样可以保持 session 的所有权和关闭语义，避免共享连接消失后悄悄建立第二条已认证 transport。
 
 Windows 上 Plink sharing identity 由用户、逻辑 host 与端口决定，因此同一系统用户不能同时由 ssh-handoff 持有两个完全相同的 Plink target；工具会在 `open` 时明确拒绝这种冲突。Windows session 使用用户 cache 下的 runtime 目录，临时 PuTTY profile 会在 session 清理时删除。
+
+会话记录和平台资源由对应的 `open` 进程持有，正常退出时自行删除。按 ID 查询只读取目标记录，`list` 只列出 owner 仍存活的会话；这两种查询均不清理资源。异常退出留下的记录与资源在下一次 `open` 创建会话时，利用已有的注册表锁回收。
 
 ## v1 范围
 

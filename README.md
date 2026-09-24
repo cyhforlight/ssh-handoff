@@ -82,6 +82,10 @@ ssh-handoff open --profile jump-alias --mode shell-pty --note '生产环境'
 
 profile 等价于执行 `ssh myserver`，HostName、User、Port、IdentityFile、ProxyJump 等配置继续由 OpenSSH 从 `~/.ssh/config` 原生读取。profile 与 direct 参数完全互斥。
 
+profile 的 `RemoteCommand` 用于 `open` 的原始连接；`run` 和 `copy` 的独立 channel 会清除它，使用各自的命令或 Shell 请求。
+
+OpenSSH 调用的 `ControlPersist`、`ForkAfterAuthentication` 和 `StdinNull` 固定为 `no`，使连接与命令进程由 ssh-handoff 持有，并由它管理交互输入、命令文本和文件数据。
+
 原生 Windows 使用 Plink，不支持 OpenSSH profile、PuTTY saved session 或 OpenSSH-to-PuTTY 配置转换。Windows 上的 `--identity` 应指向 Plink 能够读取的私钥文件；Unix 上则应使用 OpenSSH 能够读取的格式。主机指纹、密码、MFA、ssh-agent、Pageant 和密钥认证均由底层客户端在原始终端中处理。
 
 `open` 不提供 IPv4/IPv6、compression、任意 `-o` 或 extra args。复杂的 Unix OpenSSH 配置应放入 profile。文件传输由连接建立后的 `copy` 操作提供，不扩张 `open` 的连接参数。
@@ -155,7 +159,9 @@ ssh-handoff copy upload A3B4 ./app.tar /tmp/app.tar
 ssh-handoff copy download A3B4 /var/log/app.log ./app.log
 ```
 
-本地和远端目标都先写入同目录的临时文件，传输命令成功后再替换正式路径。远端需要 POSIX Shell 以及 `cat`、`mv`、`rm`；下载还要求 exec channel 的 stdout 只包含命令输出。远端路径按字面值处理，可以是绝对路径或相对于远端初始目录的相对路径；不展开 `~`、环境变量或通配符。
+本地和远端目标都先写入同目录的临时文件。上传确认本地读取和临时文件传输均成功后，再通过一个独立 command channel 提交远端文件；下载确认本地写入和传输成功后替换本地目标。这样本地读写失败不会发布不完整文件。上传异常中断或共享连接丢失时，可能留下 `.ssh-handoff-` 临时文件。
+
+远端需要 POSIX Shell 以及 `cat`、`mv`、`rm`；下载还要求 exec channel 的 stdout 只包含命令输出。远端路径按字面值处理，可以是绝对路径或相对于远端初始目录的相对路径；不展开 `~`、环境变量或通配符。
 
 首个版本不支持 `shell-pty` session、目录、文件属性、符号链接本身、进度、断点续传和校验和。源路径指向符号链接时，传输其目标文件的内容。
 
