@@ -22,7 +22,7 @@ ssh-handoff open --host internal.example.com --user operator --identity ~/.ssh/i
 
 `--host` 和 `--user` 必填，`--port` 默认为 22，`--identity` 可选。host 作为不透明值交给底层客户端，ssh-handoff 不区分域名、IPv4 与 IPv6。Unix 使用 OpenSSH 可读取的 identity，Windows 使用 Plink 可读取的 identity，不在两种格式之间转换。
 
-Linux、macOS 与 WSL 还可用 `--profile myserver` 接入 OpenSSH profile，等价于用户平时执行 `ssh myserver`。HostName、User、Port、IdentityFile、ProxyJump 等配置由 OpenSSH 从 `~/.ssh/config` 原生读取。profile 与 direct 参数完全互斥。Windows Plink 后端明确拒绝 profile，也不读取 OpenSSH config、接入 PuTTY saved session 或实现配置转换。
+Linux、macOS 与 WSL 还可用 `--profile myserver` 接入 OpenSSH profile，等价于用户平时执行 `ssh myserver`。HostName、User、Port、IdentityFile、ProxyJump 等配置由 OpenSSH 从 `~/.ssh/config` 原生读取。profile 中的 `RemoteCommand` 只作用于 `open` 的原始连接，`run` 与 `copy` 的新 channel 会清除它。profile 与 direct 参数完全互斥。Windows Plink 后端明确拒绝 profile，也不读取 OpenSSH config、接入 PuTTY saved session 或实现配置转换。
 
 `open` 保持在前台，用户在这个窗口中完成密码、MFA、扫码、主机指纹确认或堡垒机选机。工具会提示用户在进入目标 Shell 后准备托管。用户在空闲 prompt 上按 `Ctrl-]` 切换为托管状态，再按一次退出托管；两次切换各执行一次空指令进行同步。托管期间原始 Shell 不再接受普通用户输入，并且每 10 分钟执行一次空指令以维持会话活跃，但不承载 Agent 的工作命令。
 

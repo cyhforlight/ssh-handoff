@@ -78,7 +78,7 @@ ssh-handoff open --profile myserver
 ssh-handoff open --profile jump-alias --mode shell-pty --note '生产环境'
 ```
 
-profile 等价于执行 `ssh myserver`，HostName、User、Port、IdentityFile、ProxyJump 等配置继续由 OpenSSH 从 `~/.ssh/config` 原生读取。profile 与 direct 参数完全互斥。
+profile 等价于执行 `ssh myserver`，HostName、User、Port、IdentityFile、ProxyJump 等配置继续由 OpenSSH 从 `~/.ssh/config` 原生读取。profile 与 direct 参数完全互斥。profile 中的 `RemoteCommand` 只作用于 `open` 的原始连接；`run` 和 `copy` 的新 channel 会清除它，使用各自的命令或 Shell 请求。
 
 原生 Windows 使用 Plink，不支持 OpenSSH profile、PuTTY saved session 或 OpenSSH-to-PuTTY 配置转换。Windows 上的 `--identity` 应指向 Plink 能够读取的私钥文件；Unix 上则应使用 OpenSSH 能够读取的格式。主机指纹、密码、MFA、ssh-agent、Pageant 和密钥认证均由底层客户端在原始终端中处理。
 
