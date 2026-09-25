@@ -65,7 +65,6 @@ func serveOpenSession(_ *sessionRegistry, session *session, stdin *os.File, stdo
 	defer signal.Stop(shutdown)
 
 	controller := handoffController{remote: terminal}
-	defer controller.stop()
 
 	for {
 		select {

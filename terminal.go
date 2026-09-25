@@ -13,10 +13,9 @@ const (
 )
 
 type handoffController struct {
-	remote          io.Writer
-	managed         bool
-	keepaliveTick   <-chan time.Time
-	keepaliveTicker *time.Ticker
+	remote        io.Writer
+	managed       bool
+	keepaliveTick <-chan time.Time
 }
 
 func (controller *handoffController) handleInput(input []byte) (bool, error) {
@@ -53,14 +52,9 @@ func (controller *handoffController) handleInput(input []byte) (bool, error) {
 		}
 	}
 	if changed {
-		if controller.keepaliveTicker != nil {
-			controller.keepaliveTicker.Stop()
-			controller.keepaliveTicker = nil
-		}
 		controller.keepaliveTick = nil
 		if controller.managed {
-			controller.keepaliveTicker = time.NewTicker(keepaliveInterval)
-			controller.keepaliveTick = controller.keepaliveTicker.C
+			controller.keepaliveTick = time.Tick(keepaliveInterval)
 		}
 	}
 	return changed, nil
@@ -71,14 +65,6 @@ func (controller *handoffController) handoffMessage(sessionID string) string {
 		return "\r\n[ssh-handoff] " + sessionID + " 已托管；按 Ctrl-] 恢复交互。\r\n"
 	}
 	return "\r\n[ssh-handoff] " + sessionID + " 已恢复交互；按 Ctrl-] 再次托管。\r\n"
-}
-
-func (controller *handoffController) stop() {
-	if controller.keepaliveTicker != nil {
-		controller.keepaliveTicker.Stop()
-		controller.keepaliveTicker = nil
-	}
-	controller.keepaliveTick = nil
 }
 
 func (controller *handoffController) keepalive() error {
