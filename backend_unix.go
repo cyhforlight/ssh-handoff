@@ -79,9 +79,9 @@ func sshDownstreamArgs(session *session) []string {
 		// ControlMaster=no reuses the master, but falls back to a normal direct
 		// connection when the control socket is missing or not listening. That
 		// fallback would authenticate independently and bypass session
-		// ownership, so ProxyCommand=false makes it fail instead. RemoteCommand
-		// has no documented disabling value: "none" runs a command by that name
-		// and keeps the configured RemoteCommand off the downstream channel.
+		// ownership, so ProxyCommand=false makes it fail instead.
+		// RemoteCommand=none clears the configured startup command so downstream
+		// channels can use their own command or shell request.
 		"-o", "ProxyCommand=false",
 		"-o", "RemoteCommand=none",
 	)
