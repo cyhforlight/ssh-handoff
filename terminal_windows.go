@@ -195,9 +195,9 @@ func serveOpenSession(
 
 // enableVirtualTerminalOutput turns on ANSI escape sequence processing for
 // the console output buffer. The ConPTY relay emits CSI/OSC sequences that a
-// classic console host prints as literal text unless this flag is set. When
-// stdout is not attached to a console the function does nothing and returns
-// nil, so the raw bytes keep flowing to whatever sink stdout uses.
+// classic console host prints as literal text unless this flag is set.
+// A nil or non-console handle is a no-op. The caller uses CONOUT$, which still
+// refers to the attached console when stdout is redirected.
 func enableVirtualTerminalOutput(consoleOutput *os.File) (func(), error) {
 	if consoleOutput == nil {
 		return func() {}, nil
