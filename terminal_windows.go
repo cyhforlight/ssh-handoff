@@ -69,6 +69,11 @@ func serveOpenSession(
 			width, height = currentWidth, currentHeight
 		}
 	}
+	restoreVirtualTerminal, virtualTerminalErr := enableVirtualTerminalOutput(consoleOutput)
+	if virtualTerminalErr != nil {
+		writeText(stderr, "ssh-handoff open: warning: this console cannot render ANSI escape sequences; the relayed terminal output may look garbled. Windows Terminal is recommended.\n")
+	}
+	defer restoreVirtualTerminal()
 	restoreCodePages, err := useUTF8Console()
 	if err != nil {
 		writeTextf(stderr, "ssh-handoff open: configure UTF-8 console: %v\n", err)
@@ -186,6 +191,26 @@ func serveOpenSession(
 			return 1
 		}
 	}
+}
+
+// enableVirtualTerminalOutput turns on ANSI escape sequence processing for
+// the console output buffer. The ConPTY relay emits CSI/OSC sequences that a
+// classic console host prints as literal text unless this flag is set. When
+// stdout is not attached to a console the function does nothing and returns
+// nil, so the raw bytes keep flowing to whatever sink stdout uses.
+func enableVirtualTerminalOutput(consoleOutput *os.File) (func(), error) {
+	if consoleOutput == nil {
+		return func() {}, nil
+	}
+	console := windows.Handle(consoleOutput.Fd())
+	var mode uint32
+	if err := windows.GetConsoleMode(console, &mode); err != nil {
+		return func() {}, nil
+	}
+	if err := windows.SetConsoleMode(console, mode|windows.ENABLE_VIRTUAL_TERMINAL_PROCESSING); err != nil {
+		return func() {}, err
+	}
+	return func() { _ = windows.SetConsoleMode(console, mode) }, nil
 }
 
 func useUTF8Console() (func(), error) {
